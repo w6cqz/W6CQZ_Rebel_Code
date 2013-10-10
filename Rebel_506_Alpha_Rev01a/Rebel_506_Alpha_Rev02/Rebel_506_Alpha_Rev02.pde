@@ -302,11 +302,11 @@ const long meter_40             = 16076000;     // IF + Band frequency, JT65
 // range 16 > 16.3 mhz
 //JT65 const long meter_20             = 5.06e6;       // Band frequency - IF, LOW 
 // Finding I need to add 700 to be on proper QRG minus another 100 or it starts up 100 high from what I put in.  odd :(
-const long meter_20             = 5076000;      // Band frequency - IF, LOW JT65
+const long meter_20             = 5076700;      // Band frequency - IF, LOW JT65
 // side injection 20 meter 
 // range 5 > 5.35 mhz
-//const long Reference            = 49999750;     // for ad9834 this may be 
-const long Reference            = 49997264;     // Seems to be what mine is (maybe?)
+const long Reference            = 49999750;     // for ad9834 this may be 
+//const long Reference            = 49997264;     // Seems to be what mine is (maybe?)
 // tweaked in software to 
 // fine tune the Radio
 
@@ -523,7 +523,7 @@ void loop()     //
   UpdateFreq(frequency);
   // splash_RX_freq();   // this only needs to be updated when encoder changed.
 
-  TX_routine();
+  //TX_routine();
 
 
   loopCount++;

@@ -1,5 +1,5 @@
 /*
-<Rebel_506_Alpha_Rev01, Basic Software to operate a 2 band QRP Transceiver.
+<Rebel_506_Alpha_Rev02, Basic Software to operate a 2 band QRP Transceiver.
  See PROJECT REBEL QRP below>
  This library is free software; you can redistribute it and/or
  modify it under the terms of the GNU Lesser General Public
@@ -159,9 +159,20 @@
  TX_Dit  33    now  32
  
  May 15, 2013. (WA4CDM) This Rev(01) for posting on Yahoo users group.
+ 
+ Release Date to Production 7/15/2013
+ This version replaces REV (01)
+ September 04, 2013:
+ Rev(02)
+ FREQ_REGISTER_BIT needed to be set to low
+ Some ChipKits were not initializing to 0 (low) on power up
+ making the DDS think FREQ1 register was active.
+ 
  */
 
-
+// All through this program there may be some extra code that is not used
+// or commented out. 
+// It's left up to the programmer to rewrite this to suit their needs!
 
 // various defines
 #define SDATA_BIT                           10          //  keep!
@@ -270,6 +281,10 @@ int Selected_BW                 = 0;    // current Band width
 int Selected_Step               = 0;    // Current Step
 int Selected_Other              = 0;    // To be used for anything
 
+// W6CQZ Debugging already
+long gfl = 0;
+long gfh = 0;
+
 //--------------------------------------------------------
 // Encoder Stuff 
 const int encoder0PinA          = 7;
@@ -281,13 +296,17 @@ int encoder0PinALast            = LOW;
 int n                           = LOW;
 
 //------------------------------------------------------------
-const long meter_40             = 16.03e6;      // IF + Band frequency, 
+//JT65 const long meter_40             = 16.03e6;      // IF + Band frequency, 
+const long meter_40             = 16076000;     // IF + Band frequency, JT65
 // HI side injection 40 meter 
 // range 16 > 16.3 mhz
-const long meter_20             = 5.06e6;       // Band frequency - IF, LOW 
+//JT65 const long meter_20             = 5.06e6;       // Band frequency - IF, LOW 
+// Finding I need to add 700 to be on proper QRG minus another 100 or it starts up 100 high from what I put in.  odd :(
+const long meter_20             = 5076000;      // Band frequency - IF, LOW JT65
 // side injection 20 meter 
 // range 5 > 5.35 mhz
-const long Reference            = 49.99975e6;   // for ad9834 this may be 
+//const long Reference            = 49999750;     // for ad9834 this may be 
+const long Reference            = 49997264;     // Seems to be what mine is (maybe?)
 // tweaked in software to 
 // fine tune the Radio
 
@@ -420,10 +439,10 @@ void setup()
   pinMode (Band_Select,           INPUT);     // select
 
   //--------------------------------------------------------------
-  //lcd.begin(16, 4);                           // 20 chars 4 lines
-  // or change to suit ones 
-  // lcd display 
-
+  //    lcd.begin(16, 4);                           // 20 chars 4 lines
+  //                                                // or change to suit ones 
+  //                                                // lcd display 
+  //
   //--------------------------------------------------------------
   AD9834_init();
   AD9834_reset();                             // low to high
@@ -478,6 +497,9 @@ void Default_Settings()
 
   digitalWrite (Side_Tone,            LOW);    
 
+  digitalWrite ( FREQ_REGISTER_BIT,   LOW);   // Added 9/4/13
+  // not going into 
+  // Receive on power up    
 
 }
 
@@ -489,14 +511,16 @@ void loop()     //
   digitalWrite(FSYNC_BIT,             HIGH);  // 
   digitalWrite(SCLK_BIT,              HIGH);  //
 
-  RIT_Read();
+  //RIT_Read();  Do not want for JT65 - newp.
 
   Multi_Function(); 
 
   Encoder();
 
-  frequency_tune  = frequency + RitFreqOffset;
-  UpdateFreq(frequency_tune);
+  // No RIT means no need for following.
+  //frequency_tune  = frequency + RitFreqOffset; 
+  //UpdateFreq(frequency_tune);
+  UpdateFreq(frequency);
   // splash_RX_freq();   // this only needs to be updated when encoder changed.
 
   TX_routine();
@@ -532,10 +556,15 @@ void    serialDump()
   Serial.println  ( " uS" );
 
   Serial.print    ( "Freq Rx: " );
-  Serial.println  ( frequency_tune + IF );
+//  Serial.println  ( frequency_tune + IF );
+  Serial.println  ( frequency + IF );
   Serial.print    ( "Freq Tx: " );
   Serial.println  ( frequency + IF );
   Serial.println  ();
+//  Serial.print    ( "Tuning Word:  " );
+//  Serial.print    ( fcalc );
+//  Serial.print    ("  Freq Calculated:  " );
+//  Serial.println  ( Reference/(268.435456e6/fcalc) );
 
 } // end serialDump()
 
@@ -692,7 +721,7 @@ void RIT_Read()
 
 //-------------------------------------------------------------------------------
 
-void  Band_40_Limit_High()
+void  Band_40_Limit_High()   //  Ham band limits
 {
   if ( frequency < 16.3e6 )
   { 
@@ -706,7 +735,7 @@ void  Band_40_Limit_High()
   }
 }
 //-------------------------------------------------------    
-void  Band_40_Limit_Low()
+void  Band_40_Limit_Low()    //  Ham band limits
 {
   if ( frequency <= 16.0e6 )  
   { 
@@ -720,7 +749,7 @@ void  Band_40_Limit_Low()
   } 
 }
 //---------------------------------------------------------    
-void  Band_20_Limit_High()
+void  Band_20_Limit_High()      //  Ham band limits
 {
   if ( frequency < 5.35e6 )
   { 
@@ -734,7 +763,7 @@ void  Band_20_Limit_High()
   }
 }
 //-------------------------------------------------------    
-void  Band_20_Limit_Low()
+void  Band_20_Limit_Low()      //  Ham band limits
 {
   if ( frequency <= 5.0e6 )  
   { 
@@ -777,42 +806,42 @@ void Default_frequency()
 void splash_RIT()      // not used
 { 
   // lcd.clear();                         // Clear display
-  //lcd.setCursor(0, 0);
-  //lcd.print(txt64);                       //  RIT
-  //lcd.setCursor(5, 0);
-  //stringRIT = String(RitReadValue, DEC);
-  //lcd.print(stringRIT);
+  //    lcd.setCursor(0, 0);
+  //    lcd.print(txt64);                       //  RIT
+  //    lcd.setCursor(5, 0);
+  //    stringRIT = String(RitReadValue, DEC);
+  //    lcd.print(stringRIT);
 
 }
 //------------------------------------------------------------------------------
 void splash_RX_freq()
 {
-  bsm = digitalRead(Band_Select); 
-
-  RX_frequency = frequency + IF;
-
-  //lcd.setCursor(0, 1);
-  //lcd.print(txt62); // RX
-  //lcd.setCursor(6, 1);
-  //stringFREQ = String(RX_frequency, DEC);
-  //lcd.print(stringFREQ);
+  //    bsm = digitalRead(Band_Select); 
+  //     
+  //      RX_frequency = frequency + IF;
+  //
+  //      lcd.setCursor(0, 1);
+  //    lcd.print(txt62); // RX
+  //    lcd.setCursor(6, 1);
+  //    stringFREQ = String(RX_frequency, DEC);
+  //    lcd.print(stringFREQ);
 }
 
 //-----------------------------------------------------------------
 void Band_Splash()
 {
-  //if ( bsm == 1 ) 
-  //{
-    //lcd.setCursor(0, 3);
-    //lcd.print(txt65); 
-    //lcd.setCursor(6, 3);
-    //lcd.print(txt66);
-  //}
-  //else 
-  //{
-    //lcd.setCursor(6, 3);
-    //lcd.print(txt67);
-  //} 
+  //    if ( bsm == 1 ) 
+  //    {
+  //        lcd.setCursor(0, 3);
+  //        lcd.print(txt65); 
+  //        lcd.setCursor(6, 3);
+  //        lcd.print(txt66);
+  //    }
+  //    else 
+  //    {
+  //        lcd.setCursor(6, 3);
+  //        lcd.print(txt67);
+  //    } 
 }   
 
 
@@ -1132,7 +1161,9 @@ void program_freq1(long frequency)
   int flow,fhigh;
   fcalc = frequency*(268.435456e6 / Reference );    // 2^28 =
   flow = fcalc&0x3fff;              //  use for 49.99975mhz   
+  gfl = flow;
   fhigh = (fcalc>>14)&0x3fff;
+  gfh = fhigh;
   digitalWrite(FSYNC_BIT, LOW);  
   clock_data_to_ad9834(flow|AD9834_FREQ1_REGISTER_SELECT_BIT);
   clock_data_to_ad9834(fhigh|AD9834_FREQ1_REGISTER_SELECT_BIT);

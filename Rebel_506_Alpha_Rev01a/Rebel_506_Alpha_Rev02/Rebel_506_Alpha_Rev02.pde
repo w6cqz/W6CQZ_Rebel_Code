@@ -241,9 +241,6 @@ int CodeReadValue           = 0;
 const int CWSpeedReadPin    = A7;  // To adjust CW speed for user written keyer.
 int CWSpeedReadValue        = 0;            
 
-
-
-
 //#include <LiquidCrystal.h>    //  LCD Stuff
 
 //LiquidCrystal lcd(26, 27, 28, 29, 30, 31);      //  LCD Stuff
@@ -302,11 +299,10 @@ const long meter_40             = 16076000;     // IF + Band frequency, JT65
 // range 16 > 16.3 mhz
 //JT65 const long meter_20             = 5.06e6;       // Band frequency - IF, LOW 
 // Finding I need to add 700 to be on proper QRG minus another 100 or it starts up 100 high from what I put in.  odd :(
-const long meter_20             = 5076700;      // Band frequency - IF, LOW JT65
+const long meter_20             = 5076750;      // Band frequency - IF, LOW JT65
 // side injection 20 meter 
 // range 5 > 5.35 mhz
 const long Reference            = 49999750;     // for ad9834 this may be 
-//const long Reference            = 49997264;     // Seems to be what mine is (maybe?)
 // tweaked in software to 
 // fine tune the Radio
 
@@ -318,7 +314,8 @@ long frequency                  = 0;
 long frequency_old              = 0;
 long frequency_tune             = 0;
 long frequency_default          = 0;
-long fcalc;
+long fcalc0;                                        // Tuning word register 0 0 seems to be RX
+long fcalc1;                                        // Tuning word register 1 1 seems to be TX
 long IF                         = 9.00e6;          //  I.F. Frequency
 
 //------------------------------------------------------------
@@ -397,6 +394,200 @@ void Other_3();                 //   user 3
 void clock_data_to_ad9834(unsigned int data_word);
 
 //-------------------------------------------------------------------- 
+// 10-10-2013 W6CQZ
+// Adding array to hold transmit FSK values
+unsigned long fskVals0[64];
+//unsigned long fskVals1[64];
+boolean panelOn = false; // Flag to enable RIT and main tuning dial (or not) defaults to disabled
+boolean jtTXOn = false; // If true immediately start sending FSK set in fskVals0[0..63]
+boolean jtTXValid = false; // Do NOT attempt JT mode TX unless this is true - remains false until a valid TX set is uploaded.
+//----------------------------------------------------------
+// 10-10-2013 W6CQZ
+// Trying CommandMessenger Library to handle rig control
+#include <Streaming.h>  // Needed by CmdMessenger
+#include <CmdMessenger.h>
+
+CmdMessenger cmdMessenger = CmdMessenger(Serial);
+// Commands for rig control
+enum
+{
+  kError,
+  kAck,
+  gRXFreq,
+  sRXFreq,
+  gBand,
+  sTXFreq,
+  gVersion,
+  gDDSRef,
+  gDDSVer,
+  sFRXFreq,
+  sTXOn,
+  sTXOff,
+  sTXStatus,
+  sLockPanel,
+  gLockPanel,
+  gloopSpeed,
+};
+
+void attachCommandCallbacks()
+{
+  cmdMessenger.attach(OnUnknownCommand);
+  cmdMessenger.attach(gRXFreq, onGRXFreq);
+  cmdMessenger.attach(sRXFreq, onSRXFreq);
+  cmdMessenger.attach(gBand, onGBand);
+  cmdMessenger.attach(sTXFreq, onSTXFreq);
+  cmdMessenger.attach(gVersion, onGVersion);
+  cmdMessenger.attach(gDDSRef, onGDDSRef);
+  cmdMessenger.attach(gDDSVer, onGDDSVer);
+  cmdMessenger.attach(sFRXFreq, onSFRXFreq);
+  cmdMessenger.attach(sTXOn, onSTXOn);
+  cmdMessenger.attach(sTXOff, onSTXOff);
+  cmdMessenger.attach(sTXStatus, onSTXStatus);
+  cmdMessenger.attach(sLockPanel, onSLockPanel);
+  cmdMessenger.attach(gLockPanel, onGLockPanel);
+  cmdMessenger.attach(gloopSpeed, onLoopSpeed);
+}
+
+void OnUnknownCommand()
+{
+  // Do nothing - one of my all time favorites! \0/
+}
+
+void onGRXFreq()
+{
+  // Command ID = 2;
+  cmdMessenger.sendCmd(kAck,fcalc0);
+}
+  
+void onSRXFreq()
+{
+  // Command ID = 3,value;
+  unsigned long frx = cmdMessenger.readIntArg();
+  // calling my routine to take a direct tuning word
+  // this sets only register 0 (RX) to its LO value
+  // or (for 20M) (Fdesired - 9MHz) + 750 Hz
+  // +750 is to removed RX offset for CW use
+  // For 20M the LO range is 5.0 ... 5.35 MHz for a
+  // DDS Word value of 26843680 ... 28722737
+  // or for TX of 14.0 ... 14.35
+  // DDS Word value of 75162303 ... 77041361
+  // Will add 40M ranges later
+  // For 14,076,000 I get 5,076750 for a tuning word of 27255760
+  // 
+  program_ab(frx, 0);
+  cmdMessenger.sendCmd(kAck,frx);
+  fcalc0=frx;
+}
+  
+void onGBand()
+{
+  // Command ID = 4;
+  // bsm=1 = 20M bsm = 0 = 40M
+  int i = digitalRead(Band_Select);
+  if(i==0)
+  {
+    cmdMessenger.sendCmd(kAck,40);
+  } else if(i==1) {
+    cmdMessenger.sendCmd(kAck,20);
+  } else {
+    cmdMessenger.sendCmd(kError,"??");
+  }
+}
+  
+void onSTXFreq()
+{
+  // Command ID 5,val[0],...,val[63];
+  // This one is complex.  Reads in 64 integer values
+  // stuffing them into fskVals0[0..63]
+  
+}
+  
+void onGVersion()
+{
+  // Command ID = 6;
+  cmdMessenger.sendCmd(kAck,"JT65V001");
+}
+  
+void onGDDSRef()
+{
+  // Command ID = 7;
+  cmdMessenger.sendCmd(kAck,Reference);
+}
+  
+void onGDDSVer()
+{
+  // Command ID=8;
+  cmdMessenger.sendCmd(kAck,"AD9834");
+}
+
+void onSFRXFreq()
+{
+  // Command ID=9,f;
+  // Set 0 and 1 frequency registers
+  // Expects an integer frequency value as in
+  // 14076000
+  // Adjusts RX to proper LO applying any correction needed
+  long f = cmdMessenger.readIntArg();
+  long fadj = 700;
+  long fset = f+fadj;
+  fset -= IF;
+  program_freq0(fset);
+  program_freq1(f); // Not applying any adjustment to TX value (yet)
+  cmdMessenger.sendCmdStart(kAck);
+  cmdMessenger.sendCmdArg(fset);
+  cmdMessenger.sendCmdArg(f);
+  cmdMessenger.sendCmdEnd();
+}
+
+void onSTXOn()
+{
+  // Command ID 10;
+  if(jtTXValid)
+  {
+    jtTXOn = true;
+    cmdMessenger.sendCmd(kAck,1);
+  } else
+  {
+    jtTXOn = false;
+    cmdMessenger.sendCmd(kError,0);
+  }    
+}
+
+void onSTXOff()
+{
+  // Command ID 11;
+  jtTXOn = false;
+  cmdMessenger.sendCmd(kAck,1);
+}
+
+void onSTXStatus()
+{
+  // Command ID 12
+  if(jtTXOn) { cmdMessenger.sendCmd(kAck,1); } else { cmdMessenger.sendCmd(kAck,0); }
+}
+
+void onSLockPanel()
+{
+  // Command ID 13,0|1; where 0 locks controls and 1 enables
+  int i = cmdMessenger.readIntArg();
+  if(i==0) { panelOn=false; } else if(i==1) { panelOn=true; } else { panelOn = true; }
+  cmdMessenger.sendCmd(kAck,i);
+}
+
+void onGLockPanel()
+{
+  // Command ID 14;
+  if(panelOn) { cmdMessenger.sendCmd(kAck,1); } else { cmdMessenger.sendCmd(kAck,0); }
+}
+
+void onLoopSpeed()
+{
+  // Command ID=15;
+  cmdMessenger.sendCmd(kAck,loopSpeed);
+}
+
+//||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+
 void setup() 
 {
   // these pins are for the AD9834 control
@@ -465,8 +656,11 @@ void setup()
   attachCoreTimerService(TimerOverFlow);//See function at the bottom of the file.
 
   Serial.begin(115200);
-  Serial.println("Rebel Ready:");
-
+  cmdMessenger.printLfCr();
+  attachCommandCallbacks();
+  cmdMessenger.sendCmd(kAck,"Rebel Command Ready");
+//Serial.println("Rebel Ready:");
+  
 }   //    end of setup
 
 
@@ -511,20 +705,21 @@ void loop()     //
   digitalWrite(FSYNC_BIT,             HIGH);  // 
   digitalWrite(SCLK_BIT,              HIGH);  //
 
-  //RIT_Read();  Do not want for JT65 - newp.
+  // Process any serial data for commands
+  cmdMessenger.feedinSerialData();
+  
+  if(panelOn)
+  {
+    RIT_Read();
+    Encoder();
+    frequency_tune  = frequency + RitFreqOffset; 
+    UpdateFreq(frequency_tune);
+    // splash_RX_freq();   // this only needs to be updated when encoder changed.
+  }
 
   Multi_Function(); 
 
-  Encoder();
-
-  // No RIT means no need for following.
-  //frequency_tune  = frequency + RitFreqOffset; 
-  //UpdateFreq(frequency_tune);
-  UpdateFreq(frequency);
-  // splash_RX_freq();   // this only needs to be updated when encoder changed.
-
-  //TX_routine();
-
+  TX_routine();
 
   loopCount++;
   loopElapsedTime    = millis() - loopStartTime;
@@ -545,29 +740,37 @@ void    serialDump()
   loopSpeed       = (float)1e6 / loopsPerSecond;
   lastLoopCount   = loopCount;
 
-  Serial.print    ( "uptime: " );
-  Serial.print    ( ++printCount );
-  Serial.println  ( " seconds" );
+//  Serial.print    ( "uptime: " );
+//  Serial.print    ( ++printCount );
+//  Serial.println  ( " seconds" );
 
-  Serial.print    ( "loops per second:    " );
-  Serial.println  ( loopsPerSecond );
-  Serial.print    ( "loop execution time: " );
-  Serial.print    ( loopSpeed, 3 );
-  Serial.println  ( " uS" );
+//  Serial.print    ( "loops per second:    " );
+//  Serial.println  ( loopsPerSecond );
+//  Serial.print    ( "loop execution time: " );
+//  Serial.print    ( loopSpeed, 3 );
+//  Serial.println  ( " uS" );
 
-  Serial.print    ( "Freq Rx: " );
+//  Serial.print    ( "Freq Rx: " );
 //  Serial.println  ( frequency_tune + IF );
-  Serial.println  ( frequency + IF );
-  Serial.print    ( "Freq Tx: " );
-  Serial.println  ( frequency + IF );
-  Serial.println  ();
-//  Serial.print    ( "Tuning Word:  " );
-//  Serial.print    ( fcalc );
-//  Serial.print    ("  Freq Calculated:  " );
-//  Serial.println  ( Reference/(268.435456e6/fcalc) );
+//  Serial.println  ( frequency + IF );
+//  Serial.print    ( "Freq Tx: " );
+//  Serial.println  ( frequency + IF );
+//  Serial.println  ();
+//  Serial.print    ( "LO:  " );
+//  Serial.println    ( frequency );
+//  Serial.print    ( "Tuning Word 0:  " );
+//  Serial.print    ( fcalc0 );
+//  Serial.print    ( "  Tuning Word 1:  " );
+//  Serial.println  ( fcalc1 );
+//  Serial.print    ("Freq 0 Calculated:  " );
+//  Serial.print  ( Reference/(268.435456e6/fcalc0) );
+//  Serial.print    ("  Freq 1 Calculated:  " );
+//  Serial.println  ( Reference/(268.435456e6/fcalc1) );
 
 } // end serialDump()
 
+// LO:  5076750 Tuning Word:  75574353  Freq Calculated:  14076749.82
+//  fcalc = frequency*(268.435456e6 / Reference );    // 2^28 =
 
 
 //------------------ Band Select ------------------------------------
@@ -1135,6 +1338,33 @@ uint32_t TimerOverFlow(uint32_t currentTime)
   return (currentTime + CORE_TICK_RATE*(1));//the Core Tick Rate is 1ms
 
 }
+//-----------------------------------------------------------------------------
+// 10-10-2013 W6CQZ
+// Writes tuning word in f0 to AD9834 frequency register 0 and/or
+// f1 to register 1.  To set one register only pass 0 to f0 or f1
+// This wants the 28 bit tuning word!
+
+void program_ab(unsigned long f0, unsigned long f1)
+{
+  int flow,fhigh;
+  if(f0>0)
+  {
+    flow = f0&0x3fff;              //  49.99975mhz  
+    fhigh = (f0>>14)&0x3fff;
+    digitalWrite(FSYNC_BIT, LOW);  //
+    clock_data_to_ad9834(flow|AD9834_FREQ0_REGISTER_SELECT_BIT);
+    clock_data_to_ad9834(fhigh|AD9834_FREQ0_REGISTER_SELECT_BIT);
+  }
+  if(f1>0)
+  {
+    flow = f1&0x3fff;              //  49.99975mhz  
+    fhigh = (f1>>14)&0x3fff;
+    digitalWrite(FSYNC_BIT, LOW);  //
+    clock_data_to_ad9834(flow|AD9834_FREQ1_REGISTER_SELECT_BIT);
+    clock_data_to_ad9834(fhigh|AD9834_FREQ1_REGISTER_SELECT_BIT);
+    digitalWrite(FSYNC_BIT, HIGH);
+  }
+}
 
 //-----------------------------------------------------------------------------
 // ****************  Dont bother the code below  ******************************
@@ -1142,33 +1372,33 @@ uint32_t TimerOverFlow(uint32_t currentTime)
 //-----------------------------------------------------------------------------
 void program_freq0(long frequency)
 {
-  AD9834_reset_high();  
+//  AD9834_reset_high();  
   int flow,fhigh;
-  fcalc = frequency*(268.435456e6 / Reference );    // 2^28 =
-  flow = fcalc&0x3fff;              //  49.99975mhz  
-  fhigh = (fcalc>>14)&0x3fff;
+  fcalc0 = frequency*(268.435456e6 / Reference );    // 2^28 =
+  flow = fcalc0&0x3fff;              //  49.99975mhz  
+  fhigh = (fcalc0>>14)&0x3fff;
   digitalWrite(FSYNC_BIT, LOW);  //
   clock_data_to_ad9834(flow|AD9834_FREQ0_REGISTER_SELECT_BIT);
   clock_data_to_ad9834(fhigh|AD9834_FREQ0_REGISTER_SELECT_BIT);
   digitalWrite(FSYNC_BIT, HIGH);
-  AD9834_reset_low();
+//  AD9834_reset_low();
 }    // end   program_freq0
 
 //|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||  
 void program_freq1(long frequency)
 {
-  AD9834_reset_high(); 
+//  AD9834_reset_high(); 
   int flow,fhigh;
-  fcalc = frequency*(268.435456e6 / Reference );    // 2^28 =
-  flow = fcalc&0x3fff;              //  use for 49.99975mhz   
+  fcalc1 = frequency*(268.435456e6 / Reference );    // 2^28 =
+  flow = fcalc1&0x3fff;              //  use for 49.99975mhz   
   gfl = flow;
-  fhigh = (fcalc>>14)&0x3fff;
+  fhigh = (fcalc1>>14)&0x3fff;
   gfh = fhigh;
   digitalWrite(FSYNC_BIT, LOW);  
   clock_data_to_ad9834(flow|AD9834_FREQ1_REGISTER_SELECT_BIT);
   clock_data_to_ad9834(fhigh|AD9834_FREQ1_REGISTER_SELECT_BIT);
   digitalWrite(FSYNC_BIT, HIGH);  
-  AD9834_reset_low();
+//  AD9834_reset_low();
 }  
 
 //------------------------------------------------------------------------------

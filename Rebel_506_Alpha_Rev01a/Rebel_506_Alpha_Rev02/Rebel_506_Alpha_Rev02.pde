@@ -401,6 +401,8 @@ unsigned long fskVals0[64];
 boolean panelOn = false; // Flag to enable RIT and main tuning dial (or not) defaults to disabled
 boolean jtTXOn = false; // If true immediately start sending FSK set in fskVals0[0..63]
 boolean jtTXValid = false; // Do NOT attempt JT mode TX unless this is true - remains false until a valid TX set is uploaded.
+int rxOffset = 700; // Value to offset RX for correction
+int txOffset = 0; // Value to offset TX for correction
 //----------------------------------------------------------
 // 10-10-2013 W6CQZ
 // Trying CommandMessenger Library to handle rig control
@@ -427,6 +429,10 @@ enum
   sLockPanel,
   gLockPanel,
   gloopSpeed,
+  sRXOffset,
+  sTXOffset,
+  gRXOffset,
+  gTXOffset,
 };
 
 void attachCommandCallbacks()
@@ -442,10 +448,14 @@ void attachCommandCallbacks()
   cmdMessenger.attach(sFRXFreq, onSFRXFreq);
   cmdMessenger.attach(sTXOn, onSTXOn);
   cmdMessenger.attach(sTXOff, onSTXOff);
-  cmdMessenger.attach(sTXStatus, onSTXStatus);
   cmdMessenger.attach(sLockPanel, onSLockPanel);
   cmdMessenger.attach(gLockPanel, onGLockPanel);
   cmdMessenger.attach(gloopSpeed, onLoopSpeed);
+  cmdMessenger.attach(sTXStatus, onSTXStatus);
+  cmdMessenger.attach(sRXOffset, onSRXOffset);
+  cmdMessenger.attach(sTXOffset, onSTXOffset);
+  cmdMessenger.attach(gRXOffset, onGRXOffset);
+  cmdMessenger.attach(gTXOffset, onGTXOffset);
 }
 
 void OnUnknownCommand()
@@ -528,13 +538,10 @@ void onSFRXFreq()
   // 14076000
   // Adjusts RX to proper LO applying any correction needed
   long f = cmdMessenger.readIntArg();
-  long fadj = 700;
-  long fset = f+fadj;
-  fset -= IF;
-  program_freq0(fset);
-  program_freq1(f); // Not applying any adjustment to TX value (yet)
+  program_freq0((f+rxOffset)-IF);
+  program_freq1(f+txOffset);
   cmdMessenger.sendCmdStart(kAck);
-  cmdMessenger.sendCmdArg(fset);
+  cmdMessenger.sendCmdArg(f-IF);
   cmdMessenger.sendCmdArg(f);
   cmdMessenger.sendCmdEnd();
 }
@@ -586,6 +593,33 @@ void onLoopSpeed()
   cmdMessenger.sendCmd(kAck,loopSpeed);
 }
 
+void onSRXOffset()
+{
+  // Command ID=15,rx_offset_hz;
+  int i = cmdMessenger.readIntArg();
+  rxOffset = i;
+  cmdMessenger.sendCmd(kAck,i);
+}
+
+void onSTXOffset()
+{
+  // Command ID=16,tx_offset_hz;
+  int i = cmdMessenger.readIntArg();
+  txOffset = i;
+  cmdMessenger.sendCmd(kAck,i);
+}
+
+void onGRXOffset()
+{
+  // Command ID=17;
+  cmdMessenger.sendCmd(kAck,rxOffset);
+}
+
+void onGTXOffset()
+{
+  // Command ID=18;
+  cmdMessenger.sendCmd(kAck,txOffset);
+}
 //||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
 
 void setup() 

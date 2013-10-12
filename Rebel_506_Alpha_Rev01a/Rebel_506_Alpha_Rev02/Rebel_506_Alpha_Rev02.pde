@@ -299,7 +299,7 @@ const long meter_40             = 16076000;     // IF + Band frequency, JT65
 // range 16 > 16.3 mhz
 //JT65 const long meter_20             = 5.06e6;       // Band frequency - IF, LOW 
 // Finding I need to add 700 to be on proper QRG minus another 100 or it starts up 100 high from what I put in.  odd :(
-const long meter_20             = 5076750;      // Band frequency - IF, LOW JT65
+const long meter_20             = 5076700;      // Band frequency - IF, LOW JT65
 // side injection 20 meter 
 // range 5 > 5.35 mhz
 const long Reference            = 49999750;     // for ad9834 this may be 
@@ -401,7 +401,7 @@ unsigned long fskVals0[64];
 boolean panelOn = false; // Flag to enable RIT and main tuning dial (or not) defaults to disabled
 boolean jtTXOn = false; // If true immediately start sending FSK set in fskVals0[0..63]
 boolean jtTXValid = false; // Do NOT attempt JT mode TX unless this is true - remains false until a valid TX set is uploaded.
-int rxOffset = 700; // Value to offset RX for correction
+int rxOffset = 718; // Value to offset RX for correction DO NOT blindly trust this will be correct for your Rebel.
 int txOffset = 0; // Value to offset TX for correction
 //----------------------------------------------------------
 // 10-10-2013 W6CQZ
@@ -433,6 +433,8 @@ enum
   sTXOffset,
   gRXOffset,
   gTXOffset,
+  gLoadTXBlock,
+  gClearTX,
 };
 
 void attachCommandCallbacks()
@@ -456,6 +458,8 @@ void attachCommandCallbacks()
   cmdMessenger.attach(sTXOffset, onSTXOffset);
   cmdMessenger.attach(gRXOffset, onGRXOffset);
   cmdMessenger.attach(gTXOffset, onGTXOffset);
+  cmdMessenger.attach(gLoadTXBlock, onGLoadTXBlock);
+  cmdMessenger.attach(gClearTX, onGClearTX);
 }
 
 void OnUnknownCommand()
@@ -506,16 +510,90 @@ void onGBand()
   
 void onSTXFreq()
 {
-  // Command ID 5,val[0],...,val[63];
+  // Command ID 5;
   // This one is complex.  Reads in 64 integer values
   // stuffing them into fskVals0[0..63]
+  // OK - to be sure I don't over-run the input buffer
+  // between serial reads I'm going to break this down
+  // into "packets" of values.
+  // Each word is going to be an 8 character value -
+  // docs say the serial RX FIFO is 64 bytes so....
+  // lets send 16 rounds of 4 values at a time like
+  // Command ID X,Y,Z1,Z2,Z3,Z4; where
+  // X is command #19, Y is round [0..15] Z1..Z4 the 4
+  // tuning words.
+  // So call command 5 and if return is kAck start
+  // sending values.  If TX is in progress or Rebel
+  // can not otherwise handle this now response will
+  // be kError.
+  cmdMessenger.sendCmd(kAck,5); // Says go ahead with command 5
   
 }
+
+void onGClearTX()
+{
+  // Command ID 21;
+  // Clears fskVals0[] and sets jtTXValid false
+  jtTXValid = false;
+  int i;
+  for(i=0; i<64; i++) { fskVals0[i]=0; }
+  cmdMessenger.sendCmd(kAck,21);
+}
   
+void onGLoadTXBlock()
+{
+  // Command ID=20,Block {1..16},I1,I2,I3,I4;
+  // Loading 4 Integer tuning words from Block # to Block #+3
+  // into master TX array fskVals0[0..63]
+  // It is perfectly fine to send same block twice - this
+  // allows correction should a block be corrupted in transit.
+  int i = 0;
+  int block = 0;
+  unsigned long i1 = 0;
+  unsigned long i2 = 0;
+  unsigned long i3 = 0;
+  unsigned long i4 = 0;
+  block = cmdMessenger.readIntArg();
+  i1 = cmdMessenger.readIntArg();
+  i2 = cmdMessenger.readIntArg();
+  i3 = cmdMessenger.readIntArg();
+  i4 = cmdMessenger.readIntArg();
+  
+  if(block<1)
+  {
+    cmdMessenger.sendCmdStart(kError);  // NAK
+    cmdMessenger.sendCmdArg(20);        // Command
+    cmdMessenger.sendCmdArg(block);     // Parameter count where it went wrong
+    cmdMessenger.sendCmdEnd();
+  }
+  else
+  {
+    // Have right value count - (eventually) validate (now) just stuff them into values array.
+    //if(block>0) {i=block*4;} else {i=block;} // can skip this if mult by 0 is not an issue and just do i=block*4
+    i=(block-1)*4; // This adjusts block to be 0...15 - I need to spec 1...16 above to be sure I'm reading a value
+    // since cmdMessenger sets an Int value to 0 if it's not present.
+    fskVals0[i]=i1;
+    i++;
+    fskVals0[i]=i2;
+    i++;
+    fskVals0[i]=i3;
+    i++;
+    fskVals0[i]=i4;
+    cmdMessenger.sendCmdStart(kAck);
+    cmdMessenger.sendCmdArg(20);
+    cmdMessenger.sendCmdArg(block);
+    cmdMessenger.sendCmdArg(i1);  // Echo the values back just to be sure.
+    cmdMessenger.sendCmdArg(i2);  // After all... this is a TX routine so
+    cmdMessenger.sendCmdArg(i3);  // it really is a good idea to double
+    cmdMessenger.sendCmdArg(i4);  // check the values got in correct.
+    cmdMessenger.sendCmdEnd();
+  }
+}
+
 void onGVersion()
 {
   // Command ID = 6;
-  cmdMessenger.sendCmd(kAck,"JT65V001");
+  cmdMessenger.sendCmd(kAck,"JT65V003");
 }
   
 void onGDDSRef()
@@ -595,7 +673,7 @@ void onLoopSpeed()
 
 void onSRXOffset()
 {
-  // Command ID=15,rx_offset_hz;
+  // Command ID=16,rx_offset_hz;
   int i = cmdMessenger.readIntArg();
   rxOffset = i;
   cmdMessenger.sendCmd(kAck,i);
@@ -603,7 +681,7 @@ void onSRXOffset()
 
 void onSTXOffset()
 {
-  // Command ID=16,tx_offset_hz;
+  // Command ID=17,tx_offset_hz;
   int i = cmdMessenger.readIntArg();
   txOffset = i;
   cmdMessenger.sendCmd(kAck,i);
@@ -611,13 +689,13 @@ void onSTXOffset()
 
 void onGRXOffset()
 {
-  // Command ID=17;
+  // Command ID=18;
   cmdMessenger.sendCmd(kAck,rxOffset);
 }
 
 void onGTXOffset()
 {
-  // Command ID=18;
+  // Command ID=19;
   cmdMessenger.sendCmd(kAck,txOffset);
 }
 //||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
@@ -692,6 +770,9 @@ void setup()
   Serial.begin(115200);
   cmdMessenger.printLfCr();
   attachCommandCallbacks();
+  program_freq0((14076000+rxOffset)-IF); // Go ahead and set to default 20M JT65 QRG
+  program_freq1(14076000+txOffset);      // ADD code to do this based upon band set!!!
+  digitalWrite ( FREQ_REGISTER_BIT,   LOW);   // Double be sure FR0 is selected
   cmdMessenger.sendCmd(kAck,"Rebel Command Ready");
 //Serial.println("Rebel Ready:");
   

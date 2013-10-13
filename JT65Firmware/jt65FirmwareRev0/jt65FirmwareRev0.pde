@@ -53,6 +53,8 @@
 #define  Other_2_user                       1           //
 #define  Other_3_user                       2           //
 
+const int ROMVERSION        = 1; // Defines this firmware revision level - not bothering with major.minor 0 to max_int_value "should" be enough space. :)
+
 const int RitReadPin        = A0;  // pin that the sensor is attached to used for a rit routine later.
 int RitReadValue            = 0;
 int RitFreqOffset           = 0;
@@ -659,7 +661,7 @@ void onGClearTX()
 void onGVersion()
 {
   // Command ID = 6;
-  cmdMessenger.sendCmd(kAck,"JT65V005");
+  cmdMessenger.sendCmd(kAck,ROMVERSION);
 }
   
 void onGDDSRef()

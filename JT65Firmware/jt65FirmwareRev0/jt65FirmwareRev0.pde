@@ -126,19 +126,19 @@ long frequency                  = 0;
 long frequency_old              = 0;
 long frequency_tune             = 0;
 long frequency_default          = 0;
-long fcalc0;                                       // Tuning word register 0 0 seems to be RX
-long fcalc1;                                       // Tuning word register 1 1 seems to be TX
+unsigned long fcalc0;                               // Tuning word register 0 0 seems to be RX
+unsigned long fcalc1;                               // Tuning word register 1 1 seems to be TX
 long IF                         = 9.00e6;          //  I.F. Frequency
 
 //------------------------------------------------------------
 // Debug Stuff
-unsigned long   loopCount       = 0;
-unsigned long   lastLoopCount   = 0;
-unsigned long   loopsPerSecond  = 0;
-unsigned int    printCount      = 0;
-unsigned long  loopStartTime    = 0;
-unsigned long  loopElapsedTime  = 0;
-float           loopSpeed       = 0;
+unsigned long loopCount         = 0;
+unsigned long lastLoopCount     = 0;
+unsigned long loopsPerSecond    = 0;
+unsigned int  printCount        = 0;
+unsigned long loopStartTime     = 0;
+unsigned long loopElapsedTime   = 0;
+float         loopSpeed         = 0;
 unsigned long LastFreqWriteTime = 0;
 
 //-------------------------------------------------------------------- 
@@ -298,30 +298,108 @@ void loop()     //
   {
     if(jtFrameStatus())
     {
-      digitalWrite(Select_Yellow, LOW);
+      digitalWrite(Select_Yellow, LOW); // Error LED none
+      digitalWrite(Select_Green, LOW);  // RX LED off
+      digitalWrite(Select_Red, HIGH);   // TX LED on :D
+      int i;
+      int j=0;
+      unsigned long rx = getRX();
+      flipflop = false; // Sets software "flipflop" to false where it needs to be
+      // Get correct value in place for first symbol to TX
+      program_ab(fskVals[0],fskVals[1]);
+      for(i=0; i<126; i++)
+      {
+        if(i==0)
+        {
+          // Double++++++++ make sure FR zero is active and let free the blistering 5 watts upon the world
+          digitalWrite ( FREQ_REGISTER_BIT,   LOW);   // FR0 is selected
+          digitalWrite(TX_OUT, HIGH); // Frightening little bit (for now cause this is the great unknown)
+        }
+        // OK - time to get in the trenches and make this happen.  Here's the process flow.
+        // At start of TX preserve current RX value - load in first symbol value (fskVals[0]) to register 1
+        // start the actual TX and *immediately* load register 0 with next value.  After delay switch register
+        // to 0 and *immediately* load register 1 with next value.  Rinse and repeat until all 126 out the door
+        // or an abort command is received from host (or *eventually* panel button press). When TX is done,
+        // one way or another, restore RX LO value to register 0.  Done.
+        //
+        // One more time to make sure I keep my logic in line
+        // At entry I have first 2 tones in register 0 and register 1.  Need to be sure register 0 Z E R O is
+        // active as it containst the first tone. The software flipflop toggles after each delay.  If it is
+        // false we TX from 0 load to 1.  If it is true we TX from 1 load to 0.
+        // WARNING WARNING WARNING - flip() returns value of flipflop AND toggles it.  DO NOT NOT NOT call
+        // it more than once per trip through here.
+        if(flipflop)
+        {
+          // Flipflop is true so we TX from 1 load to 0.
+          // Set TX register to 1
+          digitalWrite(FREQ_REGISTER_BIT, HIGH);   // FR1 is selected
+          // Load in next value for register 0 leaving 1 alone
+          program_ab(fskVals[j],0);
+          digitalWrite(Band_End_Flash_led, LOW); // when flipflop is true we stay dark
+          j++;
+        }
+        else
+        {
+          // Flipflop is false so we TX from 0 load to 1.
+          // Set TX register to 0
+          digitalWrite(FREQ_REGISTER_BIT, LOW);   // FR0 is selected
+          // Load in next value for register 1 leaving 0 alone
+          program_ab(0,fskVals[j]);
+          digitalWrite(Band_End_Flash_led, HIGH);  // when flipflop is false we light some bling
+          j++;
+        }
+        //   
+        delay(372);
+        // CRTICIAL that this is kept right :)
+        if(flipflop)
+        {
+          flipflop = false;
+        }
+        else
+        {
+          flipflop = true;
+        }
+        // Quick call to command parser so we could catch a TX abort.
+        cmdMessenger.feedinSerialData();
+        if(!jtTXStatus())
+        {
+          // Got TX abort
+          // DROP TX NOW
+          digitalWrite(TX_OUT, LOW);
+          // Restore RX QRG
+          program_ab(rx, 0);
+          digitalWrite (FREQ_REGISTER_BIT, LOW);   // FR0 is selected
+          digitalWrite(Select_Red, LOW);          // TX LED Off
+          digitalWrite(Band_End_Flash_led, LOW);  // Bling LED Off
+          break;
+        }
+      }
+        // Clean up and restore RX
+        // Drop TX NOW
+        digitalWrite(TX_OUT, LOW);
+        program_ab(rx, 0);
+        digitalWrite(FREQ_REGISTER_BIT,LOW);   // FR0 is selected
+        digitalWrite(Select_Red, LOW);          // TX LED Off
+        digitalWrite(Band_End_Flash_led, LOW);  // Bling LED Off
     }
     else
     {
+      digitalWrite(TX_OUT, LOW); // Just to be safe :)
+      digitalWrite(FREQ_REGISTER_BIT, LOW);   // FR0 is selected
       digitalWrite(Select_Yellow, HIGH);  // Indicates the Frame data is invalid! Bad hoodoo
-    }
-    digitalWrite(Select_Green, LOW);
-    digitalWrite(Select_Red, HIGH);
-    int i;
-    for(i=0; i<126; i=i+1)
-    {
-      delay(372);
-      cmdMessenger.feedinSerialData();
-      if(!jtTXStatus()) { break; }
-      if(flip()) { digitalWrite(Band_End_Flash_led, HIGH); } else {  digitalWrite(Band_End_Flash_led, LOW); }
+      delay(500); // Give some time to see the error condition.
+      stx(false); // Set jtTXStatus false since the FSK values don't make sense.
     }
     stx(false);
   }
   else
   {
-    digitalWrite(Select_Green, HIGH);
-    digitalWrite(Select_Yellow, LOW);
-    digitalWrite(Select_Red, LOW);
-    digitalWrite(Band_End_Flash_led, LOW);
+    digitalWrite(TX_OUT, LOW); // Just to be safe :)
+    digitalWrite(FREQ_REGISTER_BIT, LOW);   // FR0 is selected
+    digitalWrite(Select_Green, HIGH);       // RX On
+    digitalWrite(Select_Yellow, LOW);       // Error none
+    digitalWrite(Select_Red, LOW);          // TX Off
+    digitalWrite(Band_End_Flash_led, LOW);  // Bling Off
   }
     
   // Keep track of loop speed
@@ -469,10 +547,19 @@ void AD9834_reset_high()
 //^^^^^^^^^^^^^^^^^^^^^^^^^  DON'T BOTHER CODE ABOVE  ^^^^^^^^^^^^^^^^^^^^^^^^^ 
 //=============================================================================
 
-// Chasing something
+unsigned long getRX()
+{
+  return fcalc0;  // Returns last set value for DDS register 0 (RX)
+}
+
 boolean jtTXStatus()
 {
   if(jtTXOn) { return true; } else {return false;}
+}
+
+void setFlip()
+{
+  flipflop = false;
 }
 
 boolean flip()

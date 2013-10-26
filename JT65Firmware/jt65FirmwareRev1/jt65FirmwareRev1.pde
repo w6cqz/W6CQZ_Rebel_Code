@@ -1,3 +1,4 @@
+
 // Version JT65V005
 // 13-October-2013
 // Added code is;
@@ -14,6 +15,14 @@
 // things not currently used as I have uses for some
 // coming up.
 //
+
+// Get all the includes up top - seems to fix some strange
+// compiler issues if I do it here.
+#include <TinyGPS.h>
+#include <LCD5110_Basic.h>
+#include <Wire.h>
+#include <Streaming.h>  // Needed by CmdMessenger
+#include <CmdMessenger.h>
 
 // various defines
 #define SDATA_BIT                           10          //  keep!
@@ -141,6 +150,187 @@ unsigned long loopElapsedTime   = 0;
 float         loopSpeed         = 0;
 unsigned long LastFreqWriteTime = 0;
 
+// GPS 
+#define gps_reset_pin  4  //GPS Reset control
+#define GPS Serial    //so we can use Serial 1 if we want
+unsigned long fix_age;
+TinyGPS tgps;
+
+int year;
+byte month, day, hour, minute, second, hundredths;
+long lat, lon;
+float LAT, LON;
+char GPSbyte;
+String s_date, s_time, s_month, s_year, s_day, s_hour, s_minute, s_second, s_hundredths;
+char A_Z[27] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+char a_z[27] = "abcdefghijklmnopqrstuvwxyz";
+String grid_text;
+char grid[6];
+boolean gps_ok;  // gps data ok flag
+int gps_tick = 0;  // GPS timeout 
+int gps_altitude;
+int gps_timeout = 120;  // 120 seconds to give GPS time to lock
+
+unsigned long time, date, speed, course;
+unsigned long chars;
+unsigned short sentences, failed_checksum;
+
+// --------------------------------------------
+// Glen's GPS routines
+
+bool feedgps(){
+  while (GPS.available())
+  {
+    GPSbyte = GPS.read();
+    //Serial.print(GPSbyte); // Uncomment for GPS Message Printout
+
+  if (tgps.encode(GPSbyte))
+      return true;
+  }
+  return 0;
+}
+
+void gpsdump(TinyGPS &tgps)
+{
+  //byte month, day, hour, minute, second, hundredths;
+  tgps.get_position(&lat, &lon);
+  LAT = lat;
+  LON = lon;
+  {
+    feedgps(); // If we don't feed the gps during this long routine, we may drop characters and get checksum errors
+  }
+}
+
+void getGPS(){
+  bool newdata = false;
+
+    if (feedgps ()){
+      newdata = true;
+    }
+  if (newdata)
+  {
+    gpsdump(tgps);
+  }
+}
+
+void GridSquare(float latitude,float longtitude)
+{
+  // Maidenhead Grid Square Calculation
+  float lat_0,lat_1, long_0, long_1, lat_2, long_2, lat_3, long_3,calc_long, calc_lat, calc_long_2, calc_lat_2, calc_long_3, calc_lat_3;
+  lat_0 = latitude/1000000;
+  long_0 = longtitude/1000000;
+  grid_text = " ";
+  int grid_long_1, grid_lat_1, grid_long_2, grid_lat_2, grid_long_3, grid_lat_3;
+
+/*  
+  Serial.println(" ");
+  Serial.print("Latitude: "); Serial.print(lat_0,7);  
+  Serial.print("   Longtitude: "); Serial.print(long_0,7); 
+*/
+
+  // Begin Calcs
+  calc_long = (long_0 + 180);
+  calc_lat = (lat_0 + 90);
+  long_1 = calc_long/20;
+  lat_1 = (lat_0 + 90)/10;
+
+/*
+  Serial.println(" "); Serial.print("calc_1ong: "); Serial.println(calc_long,7);
+  Serial.println(" "); Serial.print("calc_lat: "); Serial.println(calc_lat,7);
+*/  
+  grid_lat_1 = int(lat_1);
+  grid_long_1 = int(long_1);
+  
+  calc_long_2 = (long_0+180) - (grid_long_1 * 20);
+  long_2 = calc_long_2 / 2;
+  lat_2 = (lat_0 + 90) - (grid_lat_1 * 10);
+  grid_long_2 = int(long_2);
+  grid_lat_2 = int(lat_2);
+  
+  calc_long_3 = calc_long_2 - (grid_long_2 * 2);
+  long_3 = calc_long_3 / .083333;
+  grid_long_3 = int(long_3);
+  
+  lat_3 = (lat_2 - int(lat_2)) / .0416665;
+  grid_lat_3 = int(lat_3);
+
+/*   
+  Serial.print("    Grid Square: ");
+  Serial.print(long_1,7); Serial.print("  "); Serial.print(lat_1,7); Serial.print("  ");
+  
+  Serial.print(grid_long_1); Serial.print("  ");
+  Serial.print(grid_lat_1); Serial.print("  ");
+  Serial.print(grid_long_2); Serial.print("  ");
+  Serial.print(grid_lat_2); Serial.print("  ");
+  
+  Serial.print(grid_long_3); Serial.print("  ");
+  Serial.print(grid_lat_3); Serial.print ("  "); 
+  
+  Serial.print(calc_long_2,7); Serial.print("  ");
+  
+  
+  Serial.print(long_2,7); Serial.print("  ");
+  Serial.print(long_3,7); Serial.print("  ");
+*/
+
+  // Here's the first 2 characters of Grid Square - place into array
+  grid[0] = A_Z[grid_long_1]; 
+  grid[1] = A_Z[grid_lat_1];
+  
+  // The second set of the grid square
+  grid[2] = (grid_long_2 + 48);
+  grid[3] = (grid_lat_2 + 48);
+  
+  // The final 2 characters
+  grid[4] = a_z[grid_long_3];
+  grid[5] = a_z[grid_lat_3];
+  
+
+  grid_text = grid;
+//  Serial.print(grid_text);
+//  Serial.println(" ");
+  
+  return;
+}
+// --- End of GPS routines ---
+
+// Nokia 5110 Pin Assignments
+#define GLCD_SCK   30
+#define GLCD_MOSI  29
+#define GLCD_DC    28
+#define GLCD_RST   26
+#define GLCD_CS    27
+
+// Nokia 5110 LCD Display
+
+LCD5110 glcd(GLCD_SCK,GLCD_MOSI,GLCD_DC,GLCD_RST,GLCD_CS);
+
+extern unsigned char SmallFont[];
+
+//#include <LiquidCrystal_I2C.h>
+//LiquidCrystal lcd(26, 27, 28, 29, 30, 31);      //  LCD Stuff
+//LiquidCrystal_I2C lcd1(0x27,16,2);      //  LCD Stuff
+
+const char txt3[8]          = "100 HZ ";
+const char txt4[8]          = "1 KHZ  ";
+const char txt5[8]          = "10 KHZ ";
+const char txt52[5]         = " ";
+const char txt57[6]         = "FREQ:" ;
+const char txt60[6]         = "STEP:";
+const char txt62[3]         = "RX";
+const char txt64[4]         = "RIT";
+const char txt65[5]         = "Band";
+const char txt66[4]         = "20M";
+const char txt67[4]         = "40M";
+const char txt68[3]         = "TX";
+const char txt69[2]         = "W";
+const char txt70[2]         = "M";
+const char txt71[2]         = "N";
+const char txt72[4]         = "100";
+const char txt73[4]         = " 1K";
+const char txt74[4]         = "10K";
+
+
 //-------------------------------------------------------------------- 
 // 10-10-2013 W6CQZ
 // Adding array to hold transmit FSK values and handler for cmdMessenger serial control library
@@ -151,8 +341,6 @@ unsigned int jtSym = 0; // Index to where we are in the symbol TX chain
 int rxOffset = 718; // Value to offset RX for correction DO NOT blindly trust this will be correct for your Rebel.
 int txOffset = -50; // Value to offset TX for correction
 boolean flipflop = true; // Testing something
-#include <Streaming.h>  // Needed by CmdMessenger
-#include <CmdMessenger.h>
 CmdMessenger cmdMessenger = CmdMessenger(Serial);
 // Commands for rig control
 enum
@@ -247,17 +435,97 @@ void setup()
   AD9834_init();
   AD9834_reset();                             // low to high
   digitalWrite(TX_OUT,            LOW);       // turn off TX
+  
+  // Initialize the Nokia Display
+  glcd.InitLCD();
+  glcd.setContrast(65);    // Contrast setting of 65 looks good at 3.3v
+  glcd.setFont(SmallFont);
+  
+  
   attachCoreTimerService(TimerOverFlow);//See function at the bottom of the file.
-  Serial.begin(115200);  // Fire up serial port (For HFWST this ***must*** be 9600 or 115200 baud)
-  cmdMessenger.printLfCr(); // Making sure cmdMessenger terminates responses with CR/LF
-  attachCommandCallbacks(); // Enables callbacks for cmdMessenger
   
   // Following NEEDS to be changed to account for band vs blindly assuming 20M.
   program_freq0((14076000+rxOffset)-IF); // Go ahead and set to default 20M JT65 QRG
   program_freq1(14076000+txOffset);
   
   digitalWrite ( FREQ_REGISTER_BIT,   LOW);   // Double be sure FR0 is selected
-  // DO *****NOT***** CHANGE NEXT LINE - HFWST uses this to detect Rebel - if changed HFWST will NOT be able to see Rebel.
+  
+  Serial.begin(9600);  // GPS requires this to be 9600 baud
+  pinMode(gps_reset_pin,OUTPUT); // Set GPS Reset Pin Assignment
+  digitalWrite(gps_reset_pin,LOW);  // Reset GPS
+  glcd.clrScr();  // Clear the Nokia display
+  glcd.print("GPS",CENTER,0);
+  glcd.print("Acquiring Sats",CENTER,8);
+  glcd.print("Please Wait",CENTER,32);
+  digitalWrite(gps_reset_pin,HIGH);  // Release GPS Reset
+  // retrieves +/- lat/long in 100000ths of a degree
+  tgps.get_position(&lat, &lon, &fix_age);
+  gps_ok = false;
+  gps_tick = 0;
+  while (fix_age == TinyGPS::GPS_INVALID_AGE & gps_tick < gps_timeout)
+  {
+    tgps.get_position(&lat, &lon, &fix_age);
+    getGPS();
+    glcd.print("No Sat. Fix", CENTER,16);
+    glcd.print((" "+ String(120 - gps_tick) + " "),CENTER,40);
+    delay(1000);    
+    gps_tick++;
+  }
+  if (gps_tick < gps_timeout)
+  { 
+    gps_ok = true;
+  }
+  digitalWrite(gps_reset_pin,LOW);  // Hold GPS in Reset
+  if (gps_ok)
+  {
+    getGPS();
+    tgps.get_position(&lat, &lon, &fix_age);     
+    tgps.get_datetime(&date, &time, &fix_age);
+    s_date = date;
+    s_time = time;
+    if (s_time.length() == 7)
+    {
+      s_time = "0" + s_time;
+    }
+    s_year = "20" + s_date.substring(4,6);
+    s_month = s_date.substring(2,4);
+    s_day = s_date.substring(0,2);
+    s_hour = s_time.substring(0,2);
+    s_minute = s_time.substring(2,4);
+    s_second = s_time.substring(4,6);
+    s_hundredths = s_time.substring(6.8);
+
+    glcd.clrScr();
+    glcd.printNumF(abs(LAT/1000000),2,0,24);
+    if (LAT > 0)
+    {
+      glcd.print("N",30,24);
+    } else if (LAT < 0)
+    {
+        glcd.print("S",30,24);
+    }
+    glcd.printNumF(abs(LON/1000000),2,47,24);
+    if (LON > 0)
+    {
+      glcd.print("E",78,24);
+    } else if (LON < 0)
+    {
+      glcd.print("W",78,24);
+    }
+    GridSquare(LAT,LON);  // Calulate the Grid Square
+    glcd.print(grid_text,0,40);
+    gps_altitude = int(tgps.f_altitude());
+    glcd.print(String(gps_altitude) + "m",50,40);
+  } else {
+    glcd.clrScr();
+    glcd.print("NO GPS Data",CENTER,40);
+  }
+  
+  Serial.end(); // Ends low rate GPS processing
+  
+  Serial.begin(115200);  // Fire up serial port (For HFWST this ***must*** be 9600 or 115200 baud)
+  cmdMessenger.printLfCr(); // Making sure cmdMessenger terminates responses with CR/LF
+  attachCommandCallbacks(); // Enables callbacks for cmdMessenger
   cmdMessenger.sendCmd(kAck,"Rebel Command Ready");  // Sends a 1 time signon message at firmware strartup
 }
 //    end of setup
@@ -425,6 +693,7 @@ void loop()     //
   }
 
 }    //  END LOOP
+
 //===================================================================
 //------------------ Debug data output ------------------------------
 void    serialDump()

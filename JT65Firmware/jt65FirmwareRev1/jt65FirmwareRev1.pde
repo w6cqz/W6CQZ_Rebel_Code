@@ -63,7 +63,7 @@
 #define  Other_3_user                       2           //
 #define W6CQZ                               1           // Special functions just for me. 
 
-const int ROMVERSION        = 6; // Defines this firmware revision level - not bothering with major.minor 0 to max_int_value "should" be enough space. :)
+const int ROMVERSION        = 100; // Defines this firmware revision level - not bothering with major.minor 0 to max_int_value "should" be enough space. :)
 
 const int RitReadPin        = A0;  // pin that the sensor is attached to used for a rit routine later.
 int RitReadValue            = 0;
@@ -567,8 +567,9 @@ void loop()     //
       digitalWrite(Select_Yellow, LOW); // Error LED none
       digitalWrite(Select_Green, LOW);  // RX LED off
       digitalWrite(Select_Red, HIGH);   // TX LED on :D
-      int i;
+      int i=0;
       int j=0;
+      int k=0;
       unsigned long rx = getRX();
       flipflop = false; // Sets software "flipflop" to false where it needs to be for first symbol TX
       // Get correct value in place for first symbol to TX
@@ -577,17 +578,22 @@ void loop()     //
       // sends to DDS.
       // Adding a symbol offset to allow late TX start - this is RESET TO ZERO after TX cycle
       program_ab(fskVals[0+symoffset],fskVals[1+symoffset]);
-      for(i=0+symoffset; i<126; i++)
+      i = 0+symoffset;
+      j = j+symoffset;
+      k = 0;
+      for(i; i<126; i++)
       {
-        if(i==0)
+        if(k==0)
         {
           // Double++++++++ make sure FR zero is active and let free the blistering 5 watts upon the world
           digitalWrite ( FREQ_REGISTER_BIT,   LOW);   // FR0 is selected
-          digitalWrite(TX_OUT, HIGH); // Frightening little bit (for now cause this is the great unknown)
+          // Key external PTT before setting TX on
           if(W6CQZ==1)
           {
             digitalWrite(42,HIGH);                   // External PTT ON
           }
+          digitalWrite(TX_OUT, HIGH); // Frightening little bit (for now cause this is the great unknown)
+          k++;
         }
         // OK - time to get in the trenches and make this happen.  Here's the process flow.
         // At start of TX preserve current RX value - load in first symbol value (fskVals[0]) to register 1
@@ -653,11 +659,11 @@ void loop()     //
           // Got TX abort
           // DROP TX NOW
           symoffset=0;
+          digitalWrite(TX_OUT, LOW);
           if(W6CQZ==1)
           {
             digitalWrite(42,LOW);                   // External PTT OFF
           }
-          digitalWrite(TX_OUT, LOW);
           // Restore RX QRG
           program_ab(rx, 0);
           digitalWrite (FREQ_REGISTER_BIT, LOW);  // FR Zero is selected
@@ -669,11 +675,11 @@ void loop()     //
         // Clean up and restore RX
         // Drop TX NOW
         symoffset=0;
+        digitalWrite(TX_OUT, LOW);
         if(W6CQZ==1)
         {
           digitalWrite(42,LOW);                // External PTT OFF
         }
-        digitalWrite(TX_OUT, LOW);
         program_ab(rx, 0);
         digitalWrite(FREQ_REGISTER_BIT,LOW);    // FR Zero is selected
         digitalWrite(Select_Red, LOW);          // TX LED Off
@@ -682,11 +688,11 @@ void loop()     //
     else
     {
       // Frame did not validate
+      digitalWrite(TX_OUT, LOW); // Just to be safe :)
       if(W6CQZ==1)
       {
         digitalWrite(42,LOW);                   // External PTT OFF
       }
-      digitalWrite(TX_OUT, LOW); // Just to be safe :)
       digitalWrite(FREQ_REGISTER_BIT, LOW);   // FR Zero is selected
       digitalWrite(Select_Yellow, HIGH);  // Indicates the Frame data is invalid! Bad hoodoo
       delay(500); // Give some time to see the error condition.
@@ -696,11 +702,11 @@ void loop()     //
   }
   else
   {
+    digitalWrite(TX_OUT, LOW); // Just to be safe :)
     if(W6CQZ==1)
     {
       digitalWrite(42,LOW);                   // External PTT OFF
     }
-    digitalWrite(TX_OUT, LOW); // Just to be safe :)
     digitalWrite(FREQ_REGISTER_BIT, LOW);   // FR Zero is selected
     digitalWrite(Select_Green, HIGH);       // RX On
     digitalWrite(Select_Yellow, LOW);       // Error none
@@ -1200,15 +1206,31 @@ void onSDTXOn()
 {
   // Command ID 23;
   long i = cmdMessenger.readIntArg();
-  if(i>0) { symoffset = i; }
-  if(jtValid)
+  if(i>0 & i <45)
   {
-    jtTXOn = true;
-    cmdMessenger.sendCmd(kAck,23);
+    symoffset = i;
+    if(jtValid)
+    {
+      jtTXOn = true;
+      cmdMessenger.sendCmdStart(kAck);
+      cmdMessenger.sendCmdArg(23);
+      cmdMessenger.sendCmdArg(i);
+      cmdMessenger.sendCmdEnd();
+    } else
+    {
+      jtTXOn = false;
+      cmdMessenger.sendCmdStart(kError);
+      cmdMessenger.sendCmdArg(23);
+      cmdMessenger.sendCmdArg(-1);
+      cmdMessenger.sendCmdEnd();
+    }
   } else
   {
     jtTXOn = false;
-    cmdMessenger.sendCmd(kError,23);
-  }    
+    cmdMessenger.sendCmdStart(kError);
+    cmdMessenger.sendCmdArg(23);
+    cmdMessenger.sendCmdArg(i);
+    cmdMessenger.sendCmdEnd();
+  }
 }
 

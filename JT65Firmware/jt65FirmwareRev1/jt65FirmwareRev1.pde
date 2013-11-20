@@ -1,6 +1,6 @@
 
-// Version JT65V005
-// 13-October-2013
+// Version JT65V006
+// 19-November-2013
 // Added code is;
 // (c) J C Large - W6CQZ internal development use only
 //
@@ -61,8 +61,9 @@
 #define  Other_1_user                       0           // 
 #define  Other_2_user                       1           //
 #define  Other_3_user                       2           //
+#define ExtTX                               42          // Digital I/O 42 Pin A ChipKit J5-15 using temp as external PTT control OUTPUT
 
-const int ROMVERSION        = 2; // Defines this firmware revision level - not bothering with major.minor 0 to max_int_value "should" be enough space. :)
+const int ROMVERSION        = 6; // Defines this firmware revision level - not bothering with major.minor 0 to max_int_value "should" be enough space. :)
 
 const int RitReadPin        = A0;  // pin that the sensor is attached to used for a rit routine later.
 int RitReadValue            = 0;
@@ -117,13 +118,42 @@ int n                           = LOW;
 // Once tested as viable this will likely change to 9MHz = LO + RX RF for LO range of 2.0 MHz [RX 7.0] ... 1.7 [RX 7.3]
 // Or if you'd rather 9-Desired RX = LO = 9-7.0=2 ... 9-7.3=1.7 for low side injection to get RX USB referenced at IF.
 // Only works on paper so far.
-const long meter_40             = 16076000;     // IF + Band frequency, JT65
-// HI side injection 40 meter 
-// range 16 > 16.3 mhz
+const long meter_160            = 7162000;
+// LOW side injection 160 meter
+// range 9 - 1.8 ... 9 - 2.0 -> 7.2 ... 7.0
 
-const long meter_20             = 5076000;      // Band frequency - IF, LOW JT65
+const long meter_80             = 5424000;
+// LOW side injection 80 meter
+// range 9 - 3.5 ... 9 - 4.0 -> 5.5 ... 5
+
+const long meter_40             = 1924000;     // IF - Band frequency, LOW Side Inject JT65
+// LOW side injection 40 meter 
+// range 9 - 7 ... 9 - 7.3 -> 2.0 ... 1.7
+
+const long meter_30             = 1139000;
+// LOW side injection 30 meter
+// range 10.1 - 9 ... 10.150 - 9 -> 1.1 ... 1.15
+
+const long meter_20             = 5076000;      // Band frequency - IF, LOW Side Inject JT65
 // LOW side injection 20 meter 
-// range 5 > 5.35 mhz
+// range 14 - 9 ... 14.35 - 9 -> 5 ... 5.35
+
+const long meter_17             = 9102000;
+// LOW side injection 17 meter
+// range 18.068 - 9 ... 18.168 - 9 -> 9.068 ... 9.168
+
+const long meter_15             = 12076000;
+// LOW side injection 15 meter
+// range 21.000 - 9 ... 21.450 - 9 -> 12 ... 12.45
+
+const long meter_12             = 15917000;
+// LOW side injection 15 meter
+// range 24.890 - 9 ... 24.990 - 9 -> 15.89 ... 15.99
+
+const long meter_10             = 19076000;
+// LOW side injection 10 meter
+// range 28.000 - 9 ... 29.700 - 9 -> 19 ... 20.7
+
 
 const long Reference            = 49999750;     // for ad9834 this may be tweaked in software to fine tune the Radio
 
@@ -155,7 +185,6 @@ unsigned long LastFreqWriteTime = 0;
 #define GPS Serial    //so we can use Serial 1 if we want
 unsigned long fix_age;
 TinyGPS tgps;
-
 int year;
 byte month, day, hour, minute, second, hundredths;
 long lat, lon;
@@ -170,7 +199,6 @@ boolean gps_ok;  // gps data ok flag
 int gps_tick = 0;  // GPS timeout 
 int gps_altitude;
 int gps_timeout = 120;  // 120 seconds to give GPS time to lock
-
 unsigned long time, date, speed, course;
 unsigned long chars;
 unsigned short sentences, failed_checksum;
@@ -221,75 +249,33 @@ void GridSquare(float latitude,float longtitude)
   long_0 = longtitude/1000000;
   grid_text = " ";
   int grid_long_1, grid_lat_1, grid_long_2, grid_lat_2, grid_long_3, grid_lat_3;
-
-/*  
-  Serial.println(" ");
-  Serial.print("Latitude: "); Serial.print(lat_0,7);  
-  Serial.print("   Longtitude: "); Serial.print(long_0,7); 
-*/
-
   // Begin Calcs
   calc_long = (long_0 + 180);
   calc_lat = (lat_0 + 90);
   long_1 = calc_long/20;
   lat_1 = (lat_0 + 90)/10;
-
-/*
-  Serial.println(" "); Serial.print("calc_1ong: "); Serial.println(calc_long,7);
-  Serial.println(" "); Serial.print("calc_lat: "); Serial.println(calc_lat,7);
-*/  
   grid_lat_1 = int(lat_1);
   grid_long_1 = int(long_1);
-  
   calc_long_2 = (long_0+180) - (grid_long_1 * 20);
   long_2 = calc_long_2 / 2;
   lat_2 = (lat_0 + 90) - (grid_lat_1 * 10);
   grid_long_2 = int(long_2);
   grid_lat_2 = int(lat_2);
-  
   calc_long_3 = calc_long_2 - (grid_long_2 * 2);
   long_3 = calc_long_3 / .083333;
   grid_long_3 = int(long_3);
-  
   lat_3 = (lat_2 - int(lat_2)) / .0416665;
   grid_lat_3 = int(lat_3);
-
-/*   
-  Serial.print("    Grid Square: ");
-  Serial.print(long_1,7); Serial.print("  "); Serial.print(lat_1,7); Serial.print("  ");
-  
-  Serial.print(grid_long_1); Serial.print("  ");
-  Serial.print(grid_lat_1); Serial.print("  ");
-  Serial.print(grid_long_2); Serial.print("  ");
-  Serial.print(grid_lat_2); Serial.print("  ");
-  
-  Serial.print(grid_long_3); Serial.print("  ");
-  Serial.print(grid_lat_3); Serial.print ("  "); 
-  
-  Serial.print(calc_long_2,7); Serial.print("  ");
-  
-  
-  Serial.print(long_2,7); Serial.print("  ");
-  Serial.print(long_3,7); Serial.print("  ");
-*/
-
   // Here's the first 2 characters of Grid Square - place into array
   grid[0] = A_Z[grid_long_1]; 
   grid[1] = A_Z[grid_lat_1];
-  
   // The second set of the grid square
   grid[2] = (grid_long_2 + 48);
   grid[3] = (grid_lat_2 + 48);
-  
   // The final 2 characters
   grid[4] = a_z[grid_long_3];
   grid[5] = a_z[grid_lat_3];
-  
-
   grid_text = grid;
-//  Serial.print(grid_text);
-//  Serial.println(" ");
-  
   return;
 }
 // --- End of GPS routines ---
@@ -306,10 +292,6 @@ void GridSquare(float latitude,float longtitude)
 LCD5110 glcd(GLCD_SCK,GLCD_MOSI,GLCD_DC,GLCD_RST,GLCD_CS);
 
 extern unsigned char SmallFont[];
-
-//#include <LiquidCrystal_I2C.h>
-//LiquidCrystal lcd(26, 27, 28, 29, 30, 31);      //  LCD Stuff
-//LiquidCrystal_I2C lcd1(0x27,16,2);      //  LCD Stuff
 
 const char txt3[8]          = "100 HZ ";
 const char txt4[8]          = "1 KHZ  ";
@@ -330,7 +312,6 @@ const char txt72[4]         = "100";
 const char txt73[4]         = " 1K";
 const char txt74[4]         = "10K";
 
-
 //-------------------------------------------------------------------- 
 // 10-10-2013 W6CQZ
 // Adding array to hold transmit FSK values and handler for cmdMessenger serial control library
@@ -339,8 +320,9 @@ boolean jtTXOn = false; // If true immediately start sending FSK set in fskVals[
 boolean jtValid = false; // Do NOT attempt JT mode TX unless this is true - remains false until a valid TX set is uploaded.
 unsigned int jtSym = 0; // Index to where we are in the symbol TX chain
 int rxOffset = 718; // Value to offset RX for correction DO NOT blindly trust this will be correct for your Rebel.
-int txOffset = -50; // Value to offset TX for correction
+int txOffset = -50; // Value to offset TX for correction DO NOT blindly trust this will be correct for your Rebel.
 boolean flipflop = true; // Testing something
+long symoffset = 0;                // Begin at this Index on start TX
 CmdMessenger cmdMessenger = CmdMessenger(Serial);
 // Commands for rig control
 enum
@@ -368,6 +350,7 @@ enum
   gLoadTXBlock,
   gClearTX,
   gFSKVals,
+  sDTXOn,
 };
 // Define the command callback routines
 void attachCommandCallbacks()
@@ -393,7 +376,8 @@ void attachCommandCallbacks()
   cmdMessenger.attach(gTXOffset, onGTXOffset);        // Get TX offset value
   cmdMessenger.attach(gLoadTXBlock, onGLoadTXBlock);  // FSK tuning word loader
   cmdMessenger.attach(gClearTX, onGClearTX);          // Clear FSK tuning word array
-  cmdMessenger.attach(gFSKVals, onGFSKVals);
+  cmdMessenger.attach(gFSKVals, onGFSKVals);          // Return current loaded FSK array
+  cmdMessenger.attach(sDTXOn, onSDTXOn);              // Begin delayed TX at offset given
 }
 // --- End of cmdMessenger definition/setup ---
 
@@ -430,6 +414,9 @@ void setup()
   pinMode (Medium_A8,             OUTPUT);    // Hardware control of I.F. filter Bandwidth
   pinMode (Narrow_A9,             OUTPUT);    // Hardware control of I.F. filter Bandwidth
   pinMode (Side_Tone,             OUTPUT);    // sidetone enable
+  pinMode (ExtTX,                 OUTPUT);    // External PTT LOW = PTT OFF HIGH = PTT On
+  digitalWrite(ExtTX,LOW);                    // External PTT OFF
+
   Default_Settings();
   pinMode (Band_Select,           INPUT);     // select
   AD9834_init();
@@ -454,28 +441,28 @@ void setup()
   pinMode(gps_reset_pin,OUTPUT); // Set GPS Reset Pin Assignment
   digitalWrite(gps_reset_pin,LOW);  // Reset GPS
   glcd.clrScr();  // Clear the Nokia display
-  glcd.print("GPS",CENTER,0);
-  glcd.print("Acquiring Sats",CENTER,8);
-  glcd.print("Please Wait",CENTER,32);
-  digitalWrite(gps_reset_pin,HIGH);  // Release GPS Reset
+//  glcd.print("GPS",CENTER,0);
+//  glcd.print("Acquiring Sats",CENTER,8);
+//  glcd.print("Please Wait",CENTER,32);
+//  digitalWrite(gps_reset_pin,HIGH);  // Release GPS Reset
   // retrieves +/- lat/long in 100000ths of a degree
-  tgps.get_position(&lat, &lon, &fix_age);
+//  tgps.get_position(&lat, &lon, &fix_age);
   gps_ok = false;
-  gps_tick = 0;
-  while (fix_age == TinyGPS::GPS_INVALID_AGE & gps_tick < gps_timeout)
-  {
-    tgps.get_position(&lat, &lon, &fix_age);
-    getGPS();
-    glcd.print("No Sat. Fix", CENTER,16);
-    glcd.print((" "+ String(120 - gps_tick) + " "),CENTER,40);
-    delay(1000);    
-    gps_tick++;
-  }
-  if (gps_tick < gps_timeout)
-  { 
-    gps_ok = true;
-  }
-  digitalWrite(gps_reset_pin,LOW);  // Hold GPS in Reset
+//  gps_tick = 0;
+//  while (fix_age == TinyGPS::GPS_INVALID_AGE & gps_tick < gps_timeout)
+//  {
+//    tgps.get_position(&lat, &lon, &fix_age);
+//    getGPS();
+//    glcd.print("No Sat. Fix", CENTER,16);
+//    glcd.print((" "+ String(120 - gps_tick) + " "),CENTER,40);
+//    delay(1000);    
+//    gps_tick++;
+//  }
+//  if (gps_tick < gps_timeout)
+//  { 
+//    gps_ok = true;
+//  }
+//  digitalWrite(gps_reset_pin,LOW);  // Hold GPS in Reset
   if (gps_ok)
   {
     getGPS();
@@ -585,14 +572,16 @@ void loop()     //
       // program_ab loads register 0 and 1 in one pass.  Pass a 0 value to either if you only want to set 0 or 1.
       // program_ab takes TUNING WORDS NOT frequency values.  It then splits out the 2 14 bit tuning nibbles and
       // sends to DDS.
-      program_ab(fskVals[0],fskVals[1]);
-      for(i=0; i<126; i++)
+      // Adding a symbol offset to allow late TX start - this is RESET TO ZERO after TX cycle
+      program_ab(fskVals[0+symoffset],fskVals[1+symoffset]);
+      for(i=0+symoffset; i<126; i++)
       {
         if(i==0)
         {
           // Double++++++++ make sure FR zero is active and let free the blistering 5 watts upon the world
           digitalWrite ( FREQ_REGISTER_BIT,   LOW);   // FR0 is selected
           digitalWrite(TX_OUT, HIGH); // Frightening little bit (for now cause this is the great unknown)
+          digitalWrite(ExtTX,HIGH);                   // External PTT ON
         }
         // OK - time to get in the trenches and make this happen.  Here's the process flow.
         // At start of TX preserve current RX value - load in first symbol value (fskVals[0]) to register 1
@@ -627,8 +616,19 @@ void loop()     //
           digitalWrite(Band_End_Flash_led, HIGH);  // when flipflop is false we light some bling
           j++;
         }
-        //   
-        delay(372);
+        // Maybe not best idea... frame time is actually 371.5193 mS.  372 is running us 63mS long by end of frame.
+        // using this I do 63 at 372, 63 at 371 for a frame time of 46.809 seconds.  If I did the actual "real" JT65
+        // symbol time length frame would be 46.811 versus 46.872 doing it all at 372 or 46.746 at 371.
+        //
+        // Error value at 372 = 46.872/46.811428571428571428571428571429 = 1.0012939453125 11010.8 Samples/Second equiv     
+        // Error value at 371 = 46.746/46.811428571428571428571428571429 = 0.9986022949219 11040.4
+        // Error value at mix = 46.809/46.811428571428571428571428571429 = 0.9999481201172 11025.6
+        //
+        // Compared to what's seen with typical sound cards doing this AFSK.... any of those would be beyond fine.  :)
+        //
+        //  If it breaks look here.  :)
+        //delay(372);
+        if(flipflop) { delay(372); } else { delay(371); }
         // CRTICIAL that this is kept right :)
         if(flipflop)
         {
@@ -646,6 +646,8 @@ void loop()     //
         {
           // Got TX abort
           // DROP TX NOW
+          symoffset=0;
+          digitalWrite(ExtTX,LOW);                   // External PTT OFF
           digitalWrite(TX_OUT, LOW);
           // Restore RX QRG
           program_ab(rx, 0);
@@ -657,6 +659,8 @@ void loop()     //
       }
         // Clean up and restore RX
         // Drop TX NOW
+        symoffset=0;
+        digitalWrite(ExtTX,LOW);                // External PTT OFF
         digitalWrite(TX_OUT, LOW);
         program_ab(rx, 0);
         digitalWrite(FREQ_REGISTER_BIT,LOW);    // FR Zero is selected
@@ -665,6 +669,8 @@ void loop()     //
     }
     else
     {
+      // Frame did not validate
+      digitalWrite(ExtTX,LOW);                   // External PTT OFF
       digitalWrite(TX_OUT, LOW); // Just to be safe :)
       digitalWrite(FREQ_REGISTER_BIT, LOW);   // FR Zero is selected
       digitalWrite(Select_Yellow, HIGH);  // Indicates the Frame data is invalid! Bad hoodoo
@@ -675,6 +681,7 @@ void loop()     //
   }
   else
   {
+    digitalWrite(ExtTX,LOW);                   // External PTT OFF
     digitalWrite(TX_OUT, LOW); // Just to be safe :)
     digitalWrite(FREQ_REGISTER_BIT, LOW);   // FR Zero is selected
     digitalWrite(Select_Green, HIGH);       // RX On
@@ -884,6 +891,9 @@ void OnUnknownCommand()
   // Do nothing - one of my all time favorites! \0/
 }
 
+// Commands of the enum 0 and 1 are not command routines
+// 0 = NAK to command 1 = ACK
+
 void onGRXFreq()
 {
   // Command ID = 2;
@@ -963,73 +973,6 @@ void onSTXFreq()
   
 }
 
-void onGLoadTXBlock()
-{
-  // Command ID=20,Block {1..32},I1,I2,I3,I4;
-  // Loading 4 Integer tuning words from Block # to Block #+3
-  // into master TX array fskVals[0..127]
-  // It is perfectly fine to send same block twice - this
-  // allows correction should a block be corrupted in transit.
-  // Modifying this to take the full 126 value frame so I don't
-  // have to shuffle things here.  To keep it simple using 128
-  // elements with extra 2 set to 0.  Just keeps the 4 value
-  // chunk idea working in easy mode.  TX Routine will only
-  // go 126 :)
-  int i = 0;
-  int block = 0;
-  unsigned long i1 = 0;
-  unsigned long i2 = 0;
-  unsigned long i3 = 0;
-  unsigned long i4 = 0;
-  block = cmdMessenger.readIntArg();
-  i1 = cmdMessenger.readIntArg();
-  i2 = cmdMessenger.readIntArg();
-  i3 = cmdMessenger.readIntArg();
-  i4 = cmdMessenger.readIntArg();
-  
-  if(block<1)
-  {
-    jtValid = false;
-    cmdMessenger.sendCmdStart(kError);  // NAK
-    cmdMessenger.sendCmdArg(20);        // Command
-    cmdMessenger.sendCmdArg(block);     // Parameter count where it went wrong
-    cmdMessenger.sendCmdEnd();
-  }
-  else
-  {
-    // Have right value count - (eventually) validate (now) just stuff them into values array.
-    //if(block>0) {i=block*4;} else {i=block;} // can skip this if mult by 0 is not an issue and just do i=block*4
-    i=(block-1)*4; // This adjusts block to be 0...31 - I need to spec 1...32 above to be sure I'm reading a value
-    // since cmdMessenger sets an Int value to 0 if it's not present.
-    fskVals[i]=i1;
-    i++;
-    fskVals[i]=i2;
-    i++;
-    fskVals[i]=i3;
-    i++;
-    fskVals[i]=i4;
-    // Echo the block back for confirmation on host side.
-    cmdMessenger.sendCmdStart(20); // This was last block and simple range check = all good.
-    cmdMessenger.sendCmdArg(block);
-    cmdMessenger.sendCmdArg(i1);  // Echo the values back just to be sure.
-    cmdMessenger.sendCmdArg(i2);  // After all... this is a TX routine so
-    cmdMessenger.sendCmdArg(i3);  // it really is a good idea to double
-    cmdMessenger.sendCmdArg(i4);  // check the values got in correct.
-    cmdMessenger.sendCmdEnd();
-    if(block==32) { jtValid = true; } else { jtValid = false; }
-  }
-}
-
-void onGClearTX()
-{
-  // Command ID 21;
-  // Clears fskVals[] and sets jtTXValid false
-  jtValid = false;
-  int i;
-  for(i=0; i<129; i++) { fskVals[i]=0; }
-  cmdMessenger.sendCmd(kAck,21);
-}
-
 void onGVersion()
 {
   // Command ID = 6;
@@ -1071,15 +1014,17 @@ void onSFRXFreq()
 void onSTXOn()
 {
   // Command ID 10;
-  //if(jtTXValid)
-  //{
+  // Clear any symoffset as this is an on time TX
+  symoffset = 0;
+  if(jtValid)
+  {
     jtTXOn = true;
     cmdMessenger.sendCmd(kAck,10);
-  //} else
-  //{
-    //jtTXOn = false;
-    //cmdMessenger.sendCmd(kError,10);
-  //}    
+  } else
+  {
+    jtTXOn = false;
+    cmdMessenger.sendCmd(kError,10);
+  }    
 }
 
 void onSTXOff()
@@ -1150,6 +1095,73 @@ void onGTXOffset()
   cmdMessenger.sendCmd(kAck,txOffset);
 }
 
+void onGLoadTXBlock()
+{
+  // Command ID=20,Block {1..32},I1,I2,I3,I4;
+  // Loading 4 Integer tuning words from Block # to Block #+3
+  // into master TX array fskVals[0..127]
+  // It is perfectly fine to send same block twice - this
+  // allows correction should a block be corrupted in transit.
+  // Modifying this to take the full 126 value frame so I don't
+  // have to shuffle things here.  To keep it simple using 128
+  // elements with extra 2 set to 0.  Just keeps the 4 value
+  // chunk idea working in easy mode.  TX Routine will only
+  // go 126 :)
+  int i = 0;
+  int block = 0;
+  unsigned long i1 = 0;
+  unsigned long i2 = 0;
+  unsigned long i3 = 0;
+  unsigned long i4 = 0;
+  block = cmdMessenger.readIntArg();
+  i1 = cmdMessenger.readIntArg();
+  i2 = cmdMessenger.readIntArg();
+  i3 = cmdMessenger.readIntArg();
+  i4 = cmdMessenger.readIntArg();
+  
+  if(block<1)
+  {
+    jtValid = false;
+    cmdMessenger.sendCmdStart(kError);  // NAK
+    cmdMessenger.sendCmdArg(20);        // Command
+    cmdMessenger.sendCmdArg(block);     // Parameter count where it went wrong
+    cmdMessenger.sendCmdEnd();
+  }
+  else
+  {
+    // Have right value count - (eventually) validate (now) just stuff them into values array.
+    //if(block>0) {i=block*4;} else {i=block;} // can skip this if mult by 0 is not an issue and just do i=block*4
+    i=(block-1)*4; // This adjusts block to be 0...31 - I need to spec 1...32 above to be sure I'm reading a value
+    // since cmdMessenger sets an Int value to 0 if it's not present.
+    fskVals[i]=i1;
+    i++;
+    fskVals[i]=i2;
+    i++;
+    fskVals[i]=i3;
+    i++;
+    fskVals[i]=i4;
+    // Echo the block back for confirmation on host side.
+    cmdMessenger.sendCmdStart(20); // This was last block and simple range check = all good.
+    cmdMessenger.sendCmdArg(block);
+    cmdMessenger.sendCmdArg(i1);  // Echo the values back just to be sure.
+    cmdMessenger.sendCmdArg(i2);  // After all... this is a TX routine so
+    cmdMessenger.sendCmdArg(i3);  // it really is a good idea to double
+    cmdMessenger.sendCmdArg(i4);  // check the values got in correct.
+    cmdMessenger.sendCmdEnd();
+    if(block==32) { jtValid = true; } else { jtValid = false; }
+  }
+}
+
+void onGClearTX()
+{
+  // Command ID 21;
+  // Clears fskVals[] and sets jtTXValid false
+  jtValid = false;
+  int i;
+  for(i=0; i<129; i++) { fskVals[i]=0; }
+  cmdMessenger.sendCmd(kAck,21);
+}
+
 void onGFSKVals()
 {
   // Command ID=22;
@@ -1165,4 +1177,20 @@ void onGFSKVals()
   cmdMessenger.sendCmdEnd();
 }
 //--- End cmdMessenger callbacks ---
+
+void onSDTXOn()
+{
+  // Command ID 23;
+  long i = cmdMessenger.readIntArg();
+  if(i>0) { symoffset = i; }
+  if(jtValid)
+  {
+    jtTXOn = true;
+    cmdMessenger.sendCmd(kAck,23);
+  } else
+  {
+    jtTXOn = false;
+    cmdMessenger.sendCmd(kError,23);
+  }    
+}
 

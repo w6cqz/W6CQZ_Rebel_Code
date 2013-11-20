@@ -61,7 +61,7 @@
 #define  Other_1_user                       0           // 
 #define  Other_2_user                       1           //
 #define  Other_3_user                       2           //
-#define ExtTX                               42          // Digital I/O 42 Pin A ChipKit J5-15 using temp as external PTT control OUTPUT
+#define W6CQZ                               1           // Special functions just for me. 
 
 const int ROMVERSION        = 6; // Defines this firmware revision level - not bothering with major.minor 0 to max_int_value "should" be enough space. :)
 
@@ -414,8 +414,11 @@ void setup()
   pinMode (Medium_A8,             OUTPUT);    // Hardware control of I.F. filter Bandwidth
   pinMode (Narrow_A9,             OUTPUT);    // Hardware control of I.F. filter Bandwidth
   pinMode (Side_Tone,             OUTPUT);    // sidetone enable
-  pinMode (ExtTX,                 OUTPUT);    // External PTT LOW = PTT OFF HIGH = PTT On
-  digitalWrite(ExtTX,LOW);                    // External PTT OFF
+  if(W6CQZ==1)
+  {
+    pinMode (42,                 OUTPUT);    // External PTT LOW = PTT OFF HIGH = PTT On
+    digitalWrite(42,LOW);                    // External PTT OFF
+  }
 
   Default_Settings();
   pinMode (Band_Select,           INPUT);     // select
@@ -581,7 +584,10 @@ void loop()     //
           // Double++++++++ make sure FR zero is active and let free the blistering 5 watts upon the world
           digitalWrite ( FREQ_REGISTER_BIT,   LOW);   // FR0 is selected
           digitalWrite(TX_OUT, HIGH); // Frightening little bit (for now cause this is the great unknown)
-          digitalWrite(ExtTX,HIGH);                   // External PTT ON
+          if(W6CQZ==1)
+          {
+            digitalWrite(42,HIGH);                   // External PTT ON
+          }
         }
         // OK - time to get in the trenches and make this happen.  Here's the process flow.
         // At start of TX preserve current RX value - load in first symbol value (fskVals[0]) to register 1
@@ -647,7 +653,10 @@ void loop()     //
           // Got TX abort
           // DROP TX NOW
           symoffset=0;
-          digitalWrite(ExtTX,LOW);                   // External PTT OFF
+          if(W6CQZ==1)
+          {
+            digitalWrite(42,LOW);                   // External PTT OFF
+          }
           digitalWrite(TX_OUT, LOW);
           // Restore RX QRG
           program_ab(rx, 0);
@@ -660,7 +669,10 @@ void loop()     //
         // Clean up and restore RX
         // Drop TX NOW
         symoffset=0;
-        digitalWrite(ExtTX,LOW);                // External PTT OFF
+        if(W6CQZ==1)
+        {
+          digitalWrite(42,LOW);                // External PTT OFF
+        }
         digitalWrite(TX_OUT, LOW);
         program_ab(rx, 0);
         digitalWrite(FREQ_REGISTER_BIT,LOW);    // FR Zero is selected
@@ -670,7 +682,10 @@ void loop()     //
     else
     {
       // Frame did not validate
-      digitalWrite(ExtTX,LOW);                   // External PTT OFF
+      if(W6CQZ==1)
+      {
+        digitalWrite(42,LOW);                   // External PTT OFF
+      }
       digitalWrite(TX_OUT, LOW); // Just to be safe :)
       digitalWrite(FREQ_REGISTER_BIT, LOW);   // FR Zero is selected
       digitalWrite(Select_Yellow, HIGH);  // Indicates the Frame data is invalid! Bad hoodoo
@@ -681,7 +696,10 @@ void loop()     //
   }
   else
   {
-    digitalWrite(ExtTX,LOW);                   // External PTT OFF
+    if(W6CQZ==1)
+    {
+      digitalWrite(42,LOW);                   // External PTT OFF
+    }
     digitalWrite(TX_OUT, LOW); // Just to be safe :)
     digitalWrite(FREQ_REGISTER_BIT, LOW);   // FR Zero is selected
     digitalWrite(Select_Green, HIGH);       // RX On

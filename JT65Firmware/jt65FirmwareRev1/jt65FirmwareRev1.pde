@@ -1,6 +1,6 @@
 
 // Version JT65V006
-// 19-November-2013
+// 22-November-2013
 // Added code is;
 // (c) J C Large - W6CQZ internal development use only
 //
@@ -23,6 +23,7 @@
 #include <Wire.h>
 #include <Streaming.h>  // Needed by CmdMessenger
 #include <CmdMessenger.h>
+#include <morse.h>
 
 // various defines
 #define SDATA_BIT                           10          //  keep!
@@ -61,9 +62,9 @@
 #define  Other_1_user                       0           // 
 #define  Other_2_user                       1           //
 #define  Other_3_user                       2           //
-#define W6CQZ                               1           // Special functions just for me. 
+#define W6CQZ                               0           // Special functions just for me. 
 
-const int ROMVERSION        = 100; // Defines this firmware revision level - not bothering with major.minor 0 to max_int_value "should" be enough space. :)
+const int ROMVERSION        = 1000; // Defines this firmware revision level - not bothering with major.minor 0 to max_int_value "should" be enough space. :)
 
 const int RitReadPin        = A0;  // pin that the sensor is attached to used for a rit routine later.
 int RitReadValue            = 0;
@@ -99,10 +100,6 @@ int Selected_BW                 = 0;    // current Band width
 // 0= wide, 1 = medium, 2= narrow
 int Selected_Step               = 0;    // Current Step
 int Selected_Other              = 0;    // To be used for anything
-
-// W6CQZ Debugging already
-long gfl = 0;
-long gfh = 0;
 
 //--------------------------------------------------------
 // Encoder Stuff 
@@ -315,78 +312,104 @@ const char txt74[4]         = "10K";
 //-------------------------------------------------------------------- 
 // 10-10-2013 W6CQZ
 // Adding array to hold transmit FSK values and handler for cmdMessenger serial control library
-unsigned long fskVals[128];  // 126 JT65 symbols + 2 spares :) See notes in loader code for +2 logic.
-boolean jtTXOn = false; // If true immediately start sending FSK set in fskVals[0..125]
-boolean jtValid = false; // Do NOT attempt JT mode TX unless this is true - remains false until a valid TX set is uploaded.
-unsigned int jtSym = 0; // Index to where we are in the symbol TX chain
+unsigned long fsk65Vals[128];  // 126 JT65 symbols + 2 spares :) See notes in loader code for +2 logic.
+boolean jt65TXOn = false; // If true immediately start sending FSK set in fsk65Vals[0..125]
+boolean jt65Valid = false; // Do NOT attempt JT mode TX unless this is true - remains false until a valid TX set is uploaded.
+unsigned int jt65Sym = 0; // Index to where we are in the symbol TX chain
+
+unsigned long fsk9Vals[88]; // ## JT9 fsk symbols - same logic as JT65 - uploading FSK vals in chunks of 4 so buffer needs to be multiple 4 (3 spares)
+boolean jt9TXOn = false; // If true immediately start sending FSK set in fsk65Vals[0..125]
+boolean jt9Valid = false; // Do NOT attempt JT mode TX unless this is true - remains false until a valid TX set is uploaded.
+unsigned int jt9Sym = 0; // Index to where we are in the symbol TX chain
+
 int rxOffset = 718; // Value to offset RX for correction DO NOT blindly trust this will be correct for your Rebel.
 int txOffset = -50; // Value to offset TX for correction DO NOT blindly trust this will be correct for your Rebel.
 boolean flipflop = true; // Testing something
 long symoffset = 0;                // Begin at this Index on start TX
+boolean txcwid = false; // When true will fire off CWID in string cwid next pass through loop at frequency set in command.
+boolean txstat = false; // Any time TX is invoked set true
+unsigned long cwidqrg = 0;  // DDS tuning word for CWID QRG
+char cwid[14]; // Holds CW ID text - up to 14 characters.
 CmdMessenger cmdMessenger = CmdMessenger(Serial);
 // Commands for rig control
 enum
 {
   kError,
   kAck,
-  gRXFreq,
-  sRXFreq,
-  gBand,
-  sTXFreq,
   gVersion,
-  gDDSRef,
   gDDSVer,
-  sFRXFreq,
-  sTXOn,
-  sTXOff,
-  gTXStatus,
+  gDDSRef,
   sLockPanel,
-  gLockPanel,
+  sUnlockPanel,
   gloopSpeed,
-  sRXOffset,
-  sTXOffset,
   gRXOffset,
   gTXOffset,
-  gLoadTXBlock,
-  gClearTX,
-  gFSKVals,
+  sRXOffset,
+  sTXOffset,
+  gBand,
+  gRXFreq,
+  sRXFreq,
+  gTXStatus,
+  sTXOn,
+  sTX9On,
+  sTXOff,
   sDTXOn,
+  sD9TXOn,
+  sDoCWID,
+  gClearTX,
+  sTXFreq,
+  gLoadTXBlock,
+  gLoad9TXBlock,
+  gFSKVals,
+  gFSK9Vals,
+  gGPSGrid,
+  gGPSTime,
 };
 // Define the command callback routines
 void attachCommandCallbacks()
 {
-  cmdMessenger.attach(OnUnknownCommand);              // Catch all in case of garbage/bad command - does nothing but ignore junk.
-  cmdMessenger.attach(gRXFreq, onGRXFreq);            // Get RX QRG
-  cmdMessenger.attach(sRXFreq, onSRXFreq);            // Set RX QRG
-  cmdMessenger.attach(gBand, onGBand);                // Get Band
-  cmdMessenger.attach(sTXFreq, onSTXFreq);            // Request to setup TX array
-  cmdMessenger.attach(gVersion, onGVersion);          // Get firmware version
-  cmdMessenger.attach(gDDSRef, onGDDSRef);            // Get DDS reference QRG
-  cmdMessenger.attach(gDDSVer, onGDDSVer);            // Get DDS type
-  cmdMessenger.attach(sFRXFreq, onSFRXFreq);          // Set RX QRG (alternate version takes a Hz vs tuning word value)
-  cmdMessenger.attach(sTXOn, onSTXOn);                // Start TX
-  cmdMessenger.attach(sTXOff, onSTXOff);              // Stop TX
-  cmdMessenger.attach(sLockPanel, onSLockPanel);      // Lock out controls (going away - default is locked and stay locked)
-  cmdMessenger.attach(gLockPanel, onGLockPanel);      // Get control lock status (going away due to ^^^)
-  cmdMessenger.attach(gloopSpeed, onLoopSpeed);       // Get main loop execution speed as string
-  cmdMessenger.attach(gTXStatus, onGTXStatus);        // Get TX status, on or off
-  cmdMessenger.attach(sRXOffset, onSRXOffset);        // Set RX offset for correcting CW RX offset built into 2nd LO/mixer
-  cmdMessenger.attach(sTXOffset, onSTXOffset);        // Set TX offset (usually 0 but if you want to calibrate the Rebel *** this value *** will do it not the RX offset!
-  cmdMessenger.attach(gRXOffset, onGRXOffset);        // Get RX offset value
-  cmdMessenger.attach(gTXOffset, onGTXOffset);        // Get TX offset value
-  cmdMessenger.attach(gLoadTXBlock, onGLoadTXBlock);  // FSK tuning word loader
-  cmdMessenger.attach(gClearTX, onGClearTX);          // Clear FSK tuning word array
-  cmdMessenger.attach(gFSKVals, onGFSKVals);          // Return current loaded FSK array
-  cmdMessenger.attach(sDTXOn, onSDTXOn);              // Begin delayed TX at offset given
+  cmdMessenger.attach(OnUnknownCommand);              // Catch all in case of garbage/bad command - does nothing but ignore junk.                                              Command ID
+  cmdMessenger.attach(gVersion, onGVersion);           // Get firmware version                                                                                           2
+  cmdMessenger.attach(gDDSVer, onGDDSVer);             // Get DDS type                                                                                                   3
+  cmdMessenger.attach(gDDSRef, onGDDSRef);             // Get DDS reference QRG                                                                                          4
+  cmdMessenger.attach(sLockPanel, onSLockPanel);       // Lock out controls (going away - default is locked and stay locked)                                             5
+  cmdMessenger.attach(sUnlockPanel, onSUnlockPanel);   // Unlock panel controls (use with caution!)                                                                      6
+  cmdMessenger.attach(gloopSpeed, onLoopSpeed);        // Get main loop execution speed as string                                                                        7
+  cmdMessenger.attach(gRXOffset, onGRXOffset);         // Get RX offset value                                                                                            8
+  cmdMessenger.attach(gTXOffset, onGTXOffset);         // Get TX offset value                                                                                            9
+  cmdMessenger.attach(sRXOffset, onSRXOffset);         // Set RX offset for correcting CW RX offset built into 2nd LO/mixer                                             10
+  cmdMessenger.attach(sTXOffset, onSTXOffset);         // Set TX offset (usually 0 but if you want to calibrate the Rebel this value will do it, not the RX offset!     11
+  cmdMessenger.attach(gBand, onGBand);                 // Get Band                                                                                                      12
+  cmdMessenger.attach(gRXFreq, onGRXFreq);             // Get RX QRG                                                                                                    13
+  cmdMessenger.attach(sRXFreq, onSRXFreq);             // Set RX QRG with DDS tuning word                                                                               14
+  cmdMessenger.attach(gTXStatus, onGTXStatus);         // Get TX status, on or off - JT65 or JT9                                                                        15
+  cmdMessenger.attach(sTXOn, onSTXOn);                 // Start TX - JT65                                                                                               16
+  cmdMessenger.attach(sTX9On, onS9TXOn);               // Start TX - JT9                                                                                                17
+  cmdMessenger.attach(sTXOff, onSTXOff);               // Stop TX - JT65 or JT9                                                                                         18
+  cmdMessenger.attach(sDTXOn, onSDTXOn);               // Begin delayed TX at offset given - JT65                                                                       19
+  cmdMessenger.attach(sD9TXOn, onSD9TXOn);             // Begin delayed TX at offset given - JT9                                                                        20
+  cmdMessenger.attach(sDoCWID, onDoCWID);              // Send CW ID with string provided after current JT65 or JT9 TX is completed                                     21
+  cmdMessenger.attach(gClearTX, onGClearTX);           // Clear FSK tuning word array - Clears JT9 and JT65 FSK Array                                                   22
+  cmdMessenger.attach(sTXFreq, onSTXFreq);             // Request to setup TX array - JT65                                                                              23
+  cmdMessenger.attach(gLoadTXBlock, onGLoadTXBlock);   // FSK tuning word loader setup - JT65 format                                                                    24
+  cmdMessenger.attach(gLoad9TXBlock, onG9LoadTXBlock); // FSK tuning word loader - JT9 format                                                                           25
+  cmdMessenger.attach(gFSKVals, onGFSKVals);           // Return current loaded FSK array - JT65                                                                        26
+  cmdMessenger.attach(gFSK9Vals, onG9FSKVals);         // Return current loaded FSK array - JT9                                                                         27
+  cmdMessenger.attach(gGPSGrid, onGGPSGrid);           // Get Grid from GPS                                                                                             28
+  cmdMessenger.attach(gGPSTime, onGGPSTime);           // Get Time from GPS                                                                                             29
 }
 // --- End of cmdMessenger definition/setup ---
 
 void setup() 
 {
-  for(jtSym=0; jtSym<128; jtSym++) {fskVals[jtSym]=0;}  // 126 JT65 symbols + 2 spares :) See notes in loader code for +2 logic.
-  jtTXOn = false; // If true immediately start sending FSK set in fskVals[0..125]
-  jtValid = false; // Do NOT attempt JT mode TX unless this is true - remains false until a valid TX set is uploaded.
-  jtSym = 0; // Index to where we are in the symbol TX chain
+  for(jt65Sym=0; jt65Sym<128; jt65Sym++) {fsk65Vals[jt65Sym]=0;}  // 126 JT65 symbols + 2 spares :) See notes in loader code for +2 logic.
+  for(jt9Sym=0; jt9Sym<88; jt9Sym++) {fsk9Vals[jt9Sym]=0;} // 85 JT9 symbols + 3 spares.  Same logic on +3 as above.
+  jt65TXOn = false; // If true immediately start sending FSK set in fskVals[0..125]
+  jt65Valid = false; // Do NOT attempt JT mode TX unless this is true - remains false until a valid TX set is uploaded.
+  jt9TXOn = false; // If true immediately start sending FSK set in fskVals[0..125]
+  jt9Valid = false; // Do NOT attempt JT mode TX unless this is true - remains false until a valid TX set is uploaded.
+  jt65Sym = 0; // Index to where we are in the symbol TX chain
+  jt9Sym = 0; // Index to where we are in the symbol TX chain
   rxOffset = 0; // 700 seems the nominal so far to correct for built in CW beat note offset in 2nd LO
   txOffset = 0; // Value to offset TX for correction. Can be changed via command.  -50 seems pretty common so far.
   flipflop = true; // Testing something
@@ -426,12 +449,15 @@ void setup()
   AD9834_reset();                             // low to high
   digitalWrite(TX_OUT,            LOW);       // turn off TX
   
+  // Following sets filter to wide
+  digitalWrite( Medium_A8, LOW);   // Hardware control of I.F. filter shape
+  digitalWrite( Narrow_A9, LOW);   // Hardware control of I.F. filter shape
+  
   // Initialize the Nokia Display
   glcd.InitLCD();
   glcd.setContrast(65);    // Contrast setting of 65 looks good at 3.3v
   glcd.setFont(SmallFont);
-  
-  
+    
   attachCoreTimerService(TimerOverFlow);//See function at the bottom of the file.
   
   // Following NEEDS to be changed to account for band vs blindly assuming 20M.
@@ -516,7 +542,7 @@ void setup()
   Serial.begin(115200);  // Fire up serial port (For HFWST this ***must*** be 9600 or 115200 baud)
   cmdMessenger.printLfCr(); // Making sure cmdMessenger terminates responses with CR/LF
   attachCommandCallbacks(); // Enables callbacks for cmdMessenger
-  cmdMessenger.sendCmd(kAck,"Rebel Command Ready");  // Sends a 1 time signon message at firmware strartup
+  cmdMessenger.sendCmd(kAck,"W6CQZ_FW_1000");  // Sends a 1 time signon message at firmware strartup
 }
 //    end of setup
 
@@ -559,10 +585,10 @@ void loop()     //
   //digitalWrite(Select_Green, LOW);   //
   //digitalWrite(Select_Yellow, LOW);  // 
   //digitalWrite(Select_Red, HIGH);    //
-
-  if(jtTXStatus())
+  
+  if(jt65TXStatus())
   {
-    if(jtFrameStatus())
+    if(jt65FrameStatus())
     {
       digitalWrite(Select_Yellow, LOW); // Error LED none
       digitalWrite(Select_Green, LOW);  // RX LED off
@@ -571,13 +597,15 @@ void loop()     //
       int j=0;
       int k=0;
       unsigned long rx = getRX();
+      // Mark TX status = on
+      txstat = true;
       flipflop = false; // Sets software "flipflop" to false where it needs to be for first symbol TX
       // Get correct value in place for first symbol to TX
       // program_ab loads register 0 and 1 in one pass.  Pass a 0 value to either if you only want to set 0 or 1.
       // program_ab takes TUNING WORDS NOT frequency values.  It then splits out the 2 14 bit tuning nibbles and
       // sends to DDS.
       // Adding a symbol offset to allow late TX start - this is RESET TO ZERO after TX cycle
-      program_ab(fskVals[0+symoffset],fskVals[1+symoffset]);
+      program_ab(fsk65Vals[0+symoffset],fsk65Vals[1+symoffset]);
       i = 0+symoffset;
       j = j+symoffset;
       k = 0;
@@ -614,7 +642,7 @@ void loop()     //
           // Set TX register to 1
           digitalWrite(FREQ_REGISTER_BIT, HIGH);   // FR One is selected
           // Load in next value for register 0 leaving 1 alone
-          program_ab(fskVals[j],0);
+          program_ab(fsk65Vals[j],0);
           digitalWrite(Band_End_Flash_led, LOW); // when flipflop is true we stay dark
           j++;
         }
@@ -624,7 +652,7 @@ void loop()     //
           // Set TX register to 0
           digitalWrite(FREQ_REGISTER_BIT, LOW);   // FR Zero is selected
           // Load in next value for register 1 leaving 0 alone
-          program_ab(0,fskVals[j]);
+          program_ab(0,fsk65Vals[j]);
           digitalWrite(Band_End_Flash_led, HIGH);  // when flipflop is false we light some bling
           j++;
         }
@@ -654,7 +682,7 @@ void loop()     //
         // as is.  There's no way to stop TX without it short of yanking power.  Next build will
         // check for a panel button to abort TX as well.
         cmdMessenger.feedinSerialData();
-        if(!jtTXStatus())
+        if(!jt65TXStatus())
         {
           // Got TX abort
           // DROP TX NOW
@@ -669,21 +697,63 @@ void loop()     //
           digitalWrite (FREQ_REGISTER_BIT, LOW);  // FR Zero is selected
           digitalWrite(Select_Red, LOW);          // TX LED Off
           digitalWrite(Band_End_Flash_led, LOW);  // Bling LED Off
+          // Mark TX status = off
+          txstat = false;
+          txcwid = false; // In case it was set to go before
           break;
         }
       }
-        // Clean up and restore RX
-        // Drop TX NOW
-        symoffset=0;
-        digitalWrite(TX_OUT, LOW);
-        if(W6CQZ==1)
+      // Clean up and restore RX
+      // Drop TX NOW
+      symoffset=0;
+      digitalWrite(TX_OUT, LOW);
+      if(W6CQZ==1)
+      {
+        digitalWrite(42,LOW);                // External PTT OFF
+      }
+        
+      // Adding CW ID
+      if(txcwid)
+      {
+        // Minor delay to flush things a touch
+        delay(250);
+        // OK this should set the TX QRG to the sync +/- a little (I'm sending a tuning word with the command so that's done in HFWST)
+        // The message to send is in (string)cwid and tuning word in cwidqrg
+        LEDMorseSender cqSender(TX_OUT);
+        cqSender.setup();
+        cqSender.setMessage(cwid);
+        if(cwidqrg > 0)
         {
-          digitalWrite(42,LOW);                // External PTT OFF
+          // DDS register 1 (B) is by default used for TX - no need to preserve it right now
+          program_ab(0, cwidqrg); // Remember - program_ab takes a tuning word and sets A and B registers if value > 0.  If = 0 it skips that register.
+          digitalWrite(FREQ_REGISTER_BIT, HIGH);   // FR One is selected
+          // Mark TX on
+          txstat = true;
+          if(W6CQZ==1)
+          {
+            digitalWrite(42,HIGH);                   // External PTT ON
+            delay(20);
+          }
+          digitalWrite(Band_End_Flash_led, HIGH);
+          cqSender.sendBlocking();  // I set the default to 25 WPM - Part 97 only says I need to send an ID - not that I have to be able to copy it!  ;)
+          digitalWrite(FREQ_REGISTER_BIT, LOW);   // FR One is selected
+          digitalWrite(Band_End_Flash_led, LOW);
+          if(W6CQZ==1)
+          {
+            digitalWrite(42,LOW);                   // External PTT OFF
+          }
+          // Mark TX off
+          txstat = false;
         }
-        program_ab(rx, 0);
-        digitalWrite(FREQ_REGISTER_BIT,LOW);    // FR Zero is selected
-        digitalWrite(Select_Red, LOW);          // TX LED Off
-        digitalWrite(Band_End_Flash_led, LOW);  // Bling LED Off
+        txcwid = false; // clear it or we'll be sending it forever.
+      }
+        
+      program_ab(rx, 0);
+      digitalWrite(FREQ_REGISTER_BIT,LOW);    // FR Zero is selected
+      digitalWrite(Select_Red, LOW);          // TX LED Off
+      digitalWrite(Band_End_Flash_led, LOW);  // Bling LED Off
+      // Mark TX status = off
+      txstat = false;
     }
     else
     {
@@ -696,9 +766,11 @@ void loop()     //
       digitalWrite(FREQ_REGISTER_BIT, LOW);   // FR Zero is selected
       digitalWrite(Select_Yellow, HIGH);  // Indicates the Frame data is invalid! Bad hoodoo
       delay(500); // Give some time to see the error condition.
-      stx(false); // Set jtTXStatus false since the FSK values don't make sense.
+      stx65(false); // Set jtTXStatus false since the FSK values don't make sense.
+      // Mark TX status = off
+      txstat = false;
     }
-    stx(false);
+    stx65(false);
   }
   else
   {
@@ -712,8 +784,198 @@ void loop()     //
     digitalWrite(Select_Yellow, LOW);       // Error none
     digitalWrite(Select_Red, LOW);          // TX Off
     digitalWrite(Band_End_Flash_led, LOW);  // Bling Off
+    // Mark TX status = off
+    txstat = false;
   }
-    
+
+  if(jt9TXStatus())
+  {
+    if(jt9FrameStatus())
+    {
+      digitalWrite(Select_Yellow, LOW); // Error LED none
+      digitalWrite(Select_Green, LOW);  // RX LED off
+      digitalWrite(Select_Red, HIGH);   // TX LED on :D
+      int i=0;
+      int j=0;
+      int k=0;
+      unsigned long rx = getRX();
+      // Mark TX status = on
+      txstat = true;
+      flipflop = false; // Sets software "flipflop" to false where it needs to be for first symbol TX
+      // Get correct value in place for first symbol to TX
+      // program_ab loads register 0 and 1 in one pass.  Pass a 0 value to either if you only want to set 0 or 1.
+      // program_ab takes TUNING WORDS NOT frequency values.  It then splits out the 2 14 bit tuning nibbles and
+      // sends to DDS.
+      // Adding a symbol offset to allow late TX start - this is RESET TO ZERO after TX cycle
+      program_ab(fsk9Vals[0+symoffset],fsk9Vals[1+symoffset]);
+      i = 0+symoffset;
+      j = j+symoffset;
+      k = 0;
+      for(i; i<86; i++)
+      {
+        if(k==0)
+        {
+          // Double++++++++ make sure FR zero is active and let free the blistering 5 watts upon the world
+          digitalWrite ( FREQ_REGISTER_BIT,   LOW);   // FR0 is selected
+          // Key external PTT before setting TX on
+          if(W6CQZ==1)
+          {
+            digitalWrite(42,HIGH);                   // External PTT ON
+          }
+          digitalWrite(TX_OUT, HIGH); // Frightening little bit (for now cause this is the great unknown)
+          k++;
+        }
+        // OK - time to get in the trenches and make this happen.  Here's the process flow.
+        // At start of TX preserve current RX value - load in first symbol value (fskVals[0]) to register 1
+        // start the actual TX and *immediately* load register 0 with next value.  After delay switch register
+        // to 0 and *immediately* load register 1 with next value.  Rinse and repeat until all 126 out the door
+        // or an abort command is received from host (or *eventually* panel button press). When TX is done,
+        // one way or another, restore RX LO value to register 0.  Done.
+        //
+        // One more time to make sure I keep my logic in line
+        // At entry I have first 2 tones in register 0 and register 1.  Need to be sure register 0 Z E R O is
+        // active as it containst the first tone. The software flipflop toggles after each delay.  If it is
+        // false we TX from 0 load to 1.  If it is true we TX from 1 load to 0.
+        // WARNING WARNING WARNING DO NOT NOT NOT clobber flipflop or bad bad things will happen during a TX
+        // cycle.
+        if(flipflop)
+        {
+          // Flipflop is true so we TX from 1 load to 0.
+          // Set TX register to 1
+          digitalWrite(FREQ_REGISTER_BIT, HIGH);   // FR One is selected
+          // Load in next value for register 0 leaving 1 alone
+          program_ab(fsk9Vals[j],0);
+          digitalWrite(Band_End_Flash_led, LOW); // when flipflop is true we stay dark
+          j++;
+        }
+        else
+        {
+          // Flipflop is false so we TX from 0 load to 1.
+          // Set TX register to 0
+          digitalWrite(FREQ_REGISTER_BIT, LOW);   // FR Zero is selected
+          // Load in next value for register 1 leaving 0 alone
+          program_ab(0,fsk9Vals[j]);
+          digitalWrite(Band_End_Flash_led, HIGH);  // when flipflop is false we light some bling
+          j++;
+        }
+        delay(580); // JT9-1 says 580 mS per symbol - need to be sure JT didn't round that too much as he's want to do.
+        // CRTICIAL that this is kept right :)
+        if(flipflop)
+        {
+          flipflop = false;
+        }
+        else
+        {
+          flipflop = true;
+        }
+        // Quick call to command parser so we could catch a TX abort.  This MUST MUST MUST be left
+        // as is.  There's no way to stop TX without it short of yanking power.  Next build will
+        // check for a panel button to abort TX as well.
+        cmdMessenger.feedinSerialData();
+        if(!jt9TXStatus())
+        {
+          // Got TX abort
+          // DROP TX NOW
+          symoffset=0;
+          digitalWrite(TX_OUT, LOW);
+          if(W6CQZ==1)
+          {
+            digitalWrite(42,LOW);                   // External PTT OFF
+          }
+          // Restore RX QRG
+          program_ab(rx, 0);
+          digitalWrite (FREQ_REGISTER_BIT, LOW);  // FR Zero is selected
+          digitalWrite(Select_Red, LOW);          // TX LED Off
+          digitalWrite(Band_End_Flash_led, LOW);  // Bling LED Off
+          // Mark TX status = off
+          txstat = false;
+          txcwid = false;
+          break;
+        }
+      }
+      // Clean up and restore RX
+      // Drop TX NOW
+      symoffset=0;
+      digitalWrite(TX_OUT, LOW);
+      if(W6CQZ==1)
+      {
+        digitalWrite(42,LOW);                // External PTT OFF
+      }
+      // Adding CW ID
+      if(txcwid)
+      {
+        // Minor delay to flush things a touch
+        delay(250);
+        // OK this should set the TX QRG to the sync +/- a little (I'm sending a tuning word with the command so that's done in HFWST)
+        // The message to send is in (string)cwid and tuning word in cwidqrg
+        LEDMorseSender cqSender(TX_OUT);
+        cqSender.setup();
+        cqSender.setMessage(cwid);
+        if(cwidqrg > 0)
+        {
+          // DDS register 1 (B) is by default used for TX - no need to preserve it right now
+          program_ab(0, cwidqrg); // Remember - program_ab takes a tuning word and sets A and B registers if value > 0.  If = 0 it skips that register.
+          digitalWrite(FREQ_REGISTER_BIT, HIGH);   // FR One is selected
+          // Mark TX on
+          txstat = true;
+          if(W6CQZ==1)
+          {
+            digitalWrite(42,HIGH);                   // External PTT ON
+            delay(20);
+          }
+          digitalWrite(Band_End_Flash_led, HIGH);
+          cqSender.sendBlocking();  // I set the default to 25 WPM - Part 97 only says I need to send an ID - not that I have to be able to copy it!  ;)
+          digitalWrite(FREQ_REGISTER_BIT, LOW);   // FR One is selected
+          digitalWrite(Band_End_Flash_led, LOW);
+          if(W6CQZ==1)
+          {
+            digitalWrite(42,LOW);                   // External PTT OFF
+          }
+          // Mark TX off
+          txstat = false;
+        }
+        txcwid = false; // clear it or we'll be sending it forever.
+      }
+      program_ab(rx, 0);
+      digitalWrite(FREQ_REGISTER_BIT,LOW);    // FR Zero is selected
+      digitalWrite(Select_Red, LOW);          // TX LED Off
+      digitalWrite(Band_End_Flash_led, LOW);  // Bling LED Off
+      // Mark TX status = off
+      txstat = false;
+    }
+    else
+    {
+      // Frame did not validate
+      digitalWrite(TX_OUT, LOW); // Just to be safe :)
+      if(W6CQZ==1)
+      {
+        digitalWrite(42,LOW);                   // External PTT OFF
+      }
+      digitalWrite(FREQ_REGISTER_BIT, LOW);   // FR Zero is selected
+      digitalWrite(Select_Yellow, HIGH);  // Indicates the Frame data is invalid! Bad hoodoo
+      delay(500); // Give some time to see the error condition.
+      stx9(false); // Set jtTXStatus false since the FSK values don't make sense.
+      // Mark TX status = off
+      txstat = false;
+    }
+    stx9(false);
+  }
+  else
+  {
+    digitalWrite(TX_OUT, LOW); // Just to be safe :)
+    if(W6CQZ==1)
+    {
+      digitalWrite(42,LOW);                   // External PTT OFF
+    }
+    digitalWrite(FREQ_REGISTER_BIT, LOW);   // FR Zero is selected
+    digitalWrite(Select_Green, HIGH);       // RX On
+    digitalWrite(Select_Yellow, LOW);       // Error none
+    digitalWrite(Select_Red, LOW);          // TX Off
+    digitalWrite(Band_End_Flash_led, LOW);  // Bling Off
+    // Mark TX status = off
+    txstat = false;
+  }
+
   // Keep track of loop speed
   loopCount++;
   loopElapsedTime    = millis() - loopStartTime;
@@ -796,9 +1058,7 @@ void program_freq1(long frequency)
   int flow,fhigh;
   fcalc1 = frequency*(268.435456e6 / Reference );    // 2^28 =
   flow = fcalc1&0x3fff;              //  use for 49.99975mhz   
-  gfl = flow;
   fhigh = (fcalc1>>14)&0x3fff;
-  gfh = fhigh;
   digitalWrite(FSYNC_BIT, LOW);  
   clock_data_to_ad9834(flow|AD9834_FREQ1_REGISTER_SELECT_BIT);
   clock_data_to_ad9834(fhigh|AD9834_FREQ1_REGISTER_SELECT_BIT);
@@ -865,9 +1125,14 @@ unsigned long getRX()
   return fcalc0;  // Returns last set value for DDS register 0 (RX)
 }
 
-boolean jtTXStatus()
+boolean jt65TXStatus()
 {
-  if(jtTXOn) { return true; } else {return false;}
+  if(jt65TXOn) { return true; } else {return false;}
+}
+
+boolean jt9TXStatus()
+{
+  if(jt9TXOn) { return true; } else {return false;}
 }
 
 void setFlip()
@@ -889,13 +1154,13 @@ boolean flip()
   }
 }
 
-boolean jtFrameStatus()
+boolean jt65FrameStatus()
 {
   int i;
   boolean v = true;
   for(i=0; i<126; i++)
   {
-    if((fskVals[i] < 37581152) || (fskVals[i] > 77041361))
+    if((fsk65Vals[i] < 37581152) || (fsk65Vals[i] > 77041361))
     {
       v = false;
       break;
@@ -904,49 +1169,102 @@ boolean jtFrameStatus()
   return v;
 }
 
-void stx(boolean v)
+boolean jt9FrameStatus()
 {
-  if(v) { jtTXOn = true; } else { jtTXOn = false; }
+  int i;
+  boolean v = true;
+  for(i=0; i<86; i++)
+  {
+    if((fsk65Vals[i] < 37581152) || (fsk65Vals[i] > 77041361))
+    {
+      v = false;
+      break;
+    }
+  }
+  return v;
 }
 
-//--- cmdMessenger command callback processors by W6CQZ ---
+void stx65(boolean v)
+{
+  if(v) { jt65TXOn = true; } else { jt65TXOn = false; }
+}
+
+void stx9(boolean v)
+{
+  if(v) { jt9TXOn = true; } else { jt9TXOn = false; }
+}
+
+/*
+cmdMessenger command callback processors by W6CQZ
+Defines the CAT command set and routines for Rebel
+*/
+
 void OnUnknownCommand()
 {
   // Do nothing - one of my all time favorites! \0/
 }
-
-// Commands of the enum 0 and 1 are not command routines
-// 0 = NAK to command 1 = ACK
-
-void onGRXFreq()
+void onGVersion()
 {
   // Command ID = 2;
-  cmdMessenger.sendCmd(kAck,fcalc0);
+  cmdMessenger.sendCmd(kAck,ROMVERSION);
 }
-  
-void onSRXFreq()
+void onGDDSVer()
 {
-  // Command ID = 3,value;
-  unsigned long frx = cmdMessenger.readIntArg();
-  // calling my routine to take a direct tuning word
-  // this sets only register 0 (RX) to its LO value
-  // it ***DOES NOT*** account for the needed offset
-  // to RX due to 2nd LO being shifted to give a CW
-  // beat note.
-  //
-  // For 20M the LO range is 5.0 ... 5.35 MHz for a
-  // DDS Word value of 26843680 ... 28722737
-  // Will add 40M range later
-  // 
-  program_ab(frx, 0);
-  cmdMessenger.sendCmd(kAck,frx);
-  fcalc0=frx;
+  // Command ID = 3;
+  cmdMessenger.sendCmd(kAck,"AD9834");
 }
-  
-void onGBand()
+void onGDDSRef()
 {
   // Command ID = 4;
-  // bsm=1 = 20M bsm = 0 = 40M
+  cmdMessenger.sendCmd(kAck,Reference);
+}
+void onSLockPanel()
+{
+  // Command ID 5
+  cmdMessenger.sendCmd(kAck,5);
+}
+void onSUnlockPanel()
+{
+  // Command ID 6
+  cmdMessenger.sendCmd(kAck,6);
+}
+void onLoopSpeed()
+{
+  // Command ID=7;
+  cmdMessenger.sendCmd(kAck,loopSpeed);
+}
+void onGRXOffset()
+{
+  // Command ID=8;
+  // Reads RX offset
+  cmdMessenger.sendCmd(kAck,rxOffset);
+}
+void onGTXOffset()
+{
+  // Command ID=9;
+  // Reads TX offset
+  cmdMessenger.sendCmd(kAck,txOffset);
+}
+void onSRXOffset()
+{
+  // Command ID=10,rx_offset_hz;
+  // Sets the INTEGER value to offset RX
+  int i = cmdMessenger.readIntArg();
+  rxOffset = i;
+  cmdMessenger.sendCmd(kAck,i);
+}
+void onSTXOffset()
+{
+  // Command ID=11,tx_offset_hz;
+  // Sets the INTEGER value to offset TX
+  int i = cmdMessenger.readIntArg();
+  txOffset = i;
+  cmdMessenger.sendCmd(kAck,i);
+}
+void onGBand()
+{
+  // Command ID = 12;
+  // bsm = 1 = 20M bsm = 0 = 40M
   int i = digitalRead(Band_Select);
   if(i==0)
   {
@@ -954,174 +1272,177 @@ void onGBand()
   } else if(i==1) {
     cmdMessenger.sendCmd(kAck,20);
   } else {
-    cmdMessenger.sendCmd(kError,"??");
+    cmdMessenger.sendCmd(kError,0);
   }
 }
+void onGRXFreq()
+{
+  // Command ID = 13;
+  cmdMessenger.sendCmd(kAck,fcalc0);
+}
   
+void onSRXFreq()
+{
+  // Command ID = 14,value;
+  unsigned long frx = cmdMessenger.readIntArg();
+  // calling my routine to take a direct tuning word
+  // this sets only register 0 (RX) to its LO value
+  // it ***DOES NOT*** account for the needed offset
+  // to RX due to 2nd LO being shifted to give a CW
+  // beat note.
+  program_ab(frx, 0);
+  cmdMessenger.sendCmd(kAck,frx);
+  fcalc0=frx;
+}
+void onGTXStatus()
+{
+  // Command ID 15
+  if(txstat) { cmdMessenger.sendCmd(kAck,1); } else { cmdMessenger.sendCmd(kAck,0); }
+}
+void onSTXOn()
+{
+  // Command ID 16;
+  // Clear any symoffset as this is an on time TX
+  symoffset = 0;
+  if(jt65Valid)
+  {
+    jt65TXOn = true;
+    cmdMessenger.sendCmd(kAck,16);
+  } else
+  {
+    jt65TXOn = false;
+    cmdMessenger.sendCmd(kError,16);
+  }    
+}
+void onS9TXOn()
+{
+  // Command ID 17;
+  // Clear any symoffset as this is an on time TX
+  symoffset = 0;
+  if(jt9Valid)
+  {
+    jt9TXOn = true;
+    cmdMessenger.sendCmd(kAck,17);
+  } else
+  {
+    jt9TXOn = false;
+    cmdMessenger.sendCmd(kError,17);
+  }    
+}
+void onSTXOff()
+{
+  // Command ID 18;
+  jt65TXOn = false;
+  jt9TXOn = false;
+  txcwid = false;
+  cmdMessenger.sendCmd(kAck,18);
+}
+void onSDTXOn()
+{
+  // Command ID 19;
+  long i = cmdMessenger.readIntArg();
+  if(i>0 & i <45)
+  {
+    symoffset = i;
+    if(jt65Valid)
+    {
+      jt65TXOn = true;
+      cmdMessenger.sendCmdStart(kAck);
+      cmdMessenger.sendCmdArg(19);
+      cmdMessenger.sendCmdArg(i);
+      cmdMessenger.sendCmdEnd();
+    } else
+    {
+      jt65TXOn = false;
+      cmdMessenger.sendCmdStart(kError);
+      cmdMessenger.sendCmdArg(19);
+      cmdMessenger.sendCmdArg(-1);
+      cmdMessenger.sendCmdEnd();
+    }
+  } else
+  {
+    jt65TXOn = false;
+    cmdMessenger.sendCmdStart(kError);
+    cmdMessenger.sendCmdArg(19);
+    cmdMessenger.sendCmdArg(i);
+    cmdMessenger.sendCmdEnd();
+  }
+}
+void onSD9TXOn()
+{
+  // Command ID 20;
+  long i = cmdMessenger.readIntArg();
+  if(i>0 & i <45)
+  {
+    symoffset = i;
+    if(jt9Valid)
+    {
+      jt9TXOn = true;
+      cmdMessenger.sendCmdStart(kAck);
+      cmdMessenger.sendCmdArg(20);
+      cmdMessenger.sendCmdArg(i);
+      cmdMessenger.sendCmdEnd();
+    } else
+    {
+      jt9TXOn = false;
+      cmdMessenger.sendCmdStart(kError);
+      cmdMessenger.sendCmdArg(20);
+      cmdMessenger.sendCmdArg(-1);
+      cmdMessenger.sendCmdEnd();
+    }
+  } else
+  {
+    jt9TXOn = false;
+    cmdMessenger.sendCmdStart(kError);
+    cmdMessenger.sendCmdArg(20);
+    cmdMessenger.sendCmdArg(i);
+    cmdMessenger.sendCmdEnd();
+  }
+}
+void onDoCWID()
+{
+  // Command ID 21;
+  // Expects CWID as string and TX QRG as integer tuning word
+  String scwid = cmdMessenger.readStringArg();
+  scwid.toCharArray(cwid,14);
+  cwidqrg = cmdMessenger.readIntArg();
+  txcwid = true;
+  cmdMessenger.sendCmdStart(kAck);
+  cmdMessenger.sendCmdArg(cwid);
+  cmdMessenger.sendCmdArg(cwidqrg);
+  cmdMessenger.sendCmdEnd();
+}
+void onGClearTX()
+{
+  // Command ID 22;
+  // Clears fskVals[] and sets jtTXValid false
+  jt65Valid = false;
+  jt9Valid = false;
+  int i;
+  for(i=0; i<129; i++) { fsk65Vals[i]=0; }
+  for(i=0; i<88; i++) { fsk9Vals[i]=0; }
+  cmdMessenger.sendCmd(kAck,22);
+}
 void onSTXFreq()
 {
-  // Command ID 5;
-  // This one is complex.  Reads in 64 integer values
-  // stuffing them into fskVals1[0..126] plus two 0
-  // values in 127..128 so I can keep using the 4
-  // word blocks in easy mode.
-  //
-  // OK - to be sure I don't over-run the input buffer
-  // between serial reads I'm going to break this down
-  // into "packets" of values.
-  // Each word is going to be an 8 character value -
-  // docs say the serial RX FIFO is 64 bytes so....
-  // lets send 32 rounds of 4 values at a time like
-  // Command ID X,Y,Z1,Z2,Z3,Z4; where
-  // X is command #20, Y is round [0..15] Z1..Z4 the 4
-  // tuning words.
-  // So call command 5 and if return is kAck start
-  // sending values.  If TX is in progress or Rebel
-  // can not otherwise handle this now response will
-  // be kError.
-  // It is CRITICAL that I not change the array if TX
-  // is in progress.
-  //
-  // This ***DOES NOT*** take into account any TX offset
-  // set to place DDS in calibration.
-  //
-  if(jtTXOn)
+  // Command ID 23;
+  // Prepares FSK value receiver.  Once this is acked you can
+  // begin uploading FSK values
+  if(jt9TXOn || jt65TXOn)
   {
-    cmdMessenger.sendCmd(kError,5);
+    cmdMessenger.sendCmd(kError,23);
   }
   else
   {
-    cmdMessenger.sendCmd(kAck,5);
-    jtValid = false; // Do NOT set this true until the uploader has gotten the new frame
+    cmdMessenger.sendCmd(kAck,23);
+    jt65Valid = false;
+    jt9Valid = false;
   }
   
 }
-
-void onGVersion()
-{
-  // Command ID = 6;
-  cmdMessenger.sendCmd(kAck,ROMVERSION);
-}
-  
-void onGDDSRef()
-{
-  // Command ID = 7;
-  cmdMessenger.sendCmd(kAck,Reference);
-}
-  
-void onGDDSVer()
-{
-  // Command ID=8;
-  cmdMessenger.sendCmd(kAck,"AD9834");
-}
-
-void onSFRXFreq()
-{
-  // Command ID=9,f;
-  // Set 0 and 1 frequency registers
-  // Expects an integer frequency value as in
-  // 14076000
-  // Adjusts RX to proper LO applying any correction needed
-  //
-  // This ***DOES - NOTE THE D O E S*** apply the RX and TX
-  // adjustments set in rxOffset and txOffset
-  //
-  long f = cmdMessenger.readIntArg();
-  program_freq0((f+(rxOffset+txOffset))-IF);
-  program_freq1(f+txOffset);
-  cmdMessenger.sendCmdStart(kAck);
-  cmdMessenger.sendCmdArg(f-IF);
-  cmdMessenger.sendCmdArg(f);
-  cmdMessenger.sendCmdEnd();
-}
-
-void onSTXOn()
-{
-  // Command ID 10;
-  // Clear any symoffset as this is an on time TX
-  symoffset = 0;
-  if(jtValid)
-  {
-    jtTXOn = true;
-    cmdMessenger.sendCmd(kAck,10);
-  } else
-  {
-    jtTXOn = false;
-    cmdMessenger.sendCmd(kError,10);
-  }    
-}
-
-void onSTXOff()
-{
-  // Command ID 11;
-  jtTXOn = false;
-  cmdMessenger.sendCmd(kAck,11);
-}
-
-void onGTXStatus()
-{
-  // Command ID 12
-  if(jtTXOn) { cmdMessenger.sendCmd(kAck,1); } else { cmdMessenger.sendCmd(kAck,0); }
-}
-
-void onSLockPanel()
-{
-  // Command ID 13,0|1; where 0 locks controls and 1 enables
-  // Need to remove this but it means reordering the command set and too lazy
-  // to do right now - will replace them with other functions anyhow.  Panel
-  // is now ALWAYS locked though I do intend to monitor 1 button for a manual
-  // TX stop method in case CAT barfs.
-  cmdMessenger.sendCmd(kAck,1);
-}
-
-void onGLockPanel()
-{
-  // Command ID 14;
-  // Can leave this but will eventually repurpose.
-  cmdMessenger.sendCmd(kAck,1);
-}
-
-void onLoopSpeed()
-{
-  // Command ID=15;
-  cmdMessenger.sendCmd(kAck,loopSpeed);
-}
-
-void onSRXOffset()
-{
-  // Command ID=16,rx_offset_hz;
-  // Sets the INTEGER value to offset RX
-  int i = cmdMessenger.readIntArg();
-  rxOffset = i;
-  cmdMessenger.sendCmd(kAck,i);
-}
-
-void onSTXOffset()
-{
-  // Command ID=17,tx_offset_hz;
-  // Sets the INTEGER value to offset TX
-  int i = cmdMessenger.readIntArg();
-  txOffset = i;
-  cmdMessenger.sendCmd(kAck,i);
-}
-
-void onGRXOffset()
-{
-  // Command ID=18;
-  // Reads RX offset
-  cmdMessenger.sendCmd(kAck,rxOffset);
-}
-
-void onGTXOffset()
-{
-  // Command ID=19;
-  // Reads TX offset
-  cmdMessenger.sendCmd(kAck,txOffset);
-}
-
 void onGLoadTXBlock()
 {
-  // Command ID=20,Block {1..32},I1,I2,I3,I4;
+  // Command ID=24,Block {1..32},I1,I2,I3,I4;
   // Loading 4 Integer tuning words from Block # to Block #+3
   // into master TX array fskVals[0..127]
   // It is perfectly fine to send same block twice - this
@@ -1145,9 +1466,9 @@ void onGLoadTXBlock()
   
   if(block<1)
   {
-    jtValid = false;
+    jt65Valid = false;
     cmdMessenger.sendCmdStart(kError);  // NAK
-    cmdMessenger.sendCmdArg(20);        // Command
+    cmdMessenger.sendCmdArg(24);        // Command
     cmdMessenger.sendCmdArg(block);     // Parameter count where it went wrong
     cmdMessenger.sendCmdEnd();
   }
@@ -1157,38 +1478,83 @@ void onGLoadTXBlock()
     //if(block>0) {i=block*4;} else {i=block;} // can skip this if mult by 0 is not an issue and just do i=block*4
     i=(block-1)*4; // This adjusts block to be 0...31 - I need to spec 1...32 above to be sure I'm reading a value
     // since cmdMessenger sets an Int value to 0 if it's not present.
-    fskVals[i]=i1;
+    fsk65Vals[i]=i1;
     i++;
-    fskVals[i]=i2;
+    fsk65Vals[i]=i2;
     i++;
-    fskVals[i]=i3;
+    fsk65Vals[i]=i3;
     i++;
-    fskVals[i]=i4;
+    fsk65Vals[i]=i4;
     // Echo the block back for confirmation on host side.
-    cmdMessenger.sendCmdStart(20); // This was last block and simple range check = all good.
+    cmdMessenger.sendCmdStart(24); // This was last block and simple range check = all good.
     cmdMessenger.sendCmdArg(block);
     cmdMessenger.sendCmdArg(i1);  // Echo the values back just to be sure.
     cmdMessenger.sendCmdArg(i2);  // After all... this is a TX routine so
     cmdMessenger.sendCmdArg(i3);  // it really is a good idea to double
     cmdMessenger.sendCmdArg(i4);  // check the values got in correct.
     cmdMessenger.sendCmdEnd();
-    if(block==32) { jtValid = true; } else { jtValid = false; }
+    if(block==32) { jt65Valid = true; } else { jt65Valid = false; }
   }
 }
-
-void onGClearTX()
+void onG9LoadTXBlock()
 {
-  // Command ID 21;
-  // Clears fskVals[] and sets jtTXValid false
-  jtValid = false;
-  int i;
-  for(i=0; i<129; i++) { fskVals[i]=0; }
-  cmdMessenger.sendCmd(kAck,21);
+  // Command ID=25,Block {1..22},I1,I2,I3,I4;
+  // Loading 4 Integer tuning words from Block # to Block #+3
+  // into master TX array fsk9Vals[0..87]
+  // It is perfectly fine to send same block twice - this
+  // allows correction should a block be corrupted in transit.
+  // Modifying this to take the full 85 value frame so I don't
+  // have to shuffle things here.  To keep it simple using 88
+  // elements with extra 3 set to 0.  Just keeps the 4 value
+  // chunk idea working in easy mode.  TX Routine will only
+  // go 85 :)
+  int i = 0;
+  int block = 0;
+  unsigned long i1 = 0;
+  unsigned long i2 = 0;
+  unsigned long i3 = 0;
+  unsigned long i4 = 0;
+  block = cmdMessenger.readIntArg();
+  i1 = cmdMessenger.readIntArg();
+  i2 = cmdMessenger.readIntArg();
+  i3 = cmdMessenger.readIntArg();
+  i4 = cmdMessenger.readIntArg();
+  
+  if(block<1)
+  {
+    jt9Valid = false;
+    cmdMessenger.sendCmdStart(kError);  // NAK
+    cmdMessenger.sendCmdArg(25);        // Command
+    cmdMessenger.sendCmdArg(block);     // Parameter count where it went wrong
+    cmdMessenger.sendCmdEnd();
+  }
+  else
+  {
+    // Have right value count - (eventually) validate (now) just stuff them into values array.
+    //if(block>0) {i=block*4;} else {i=block;} // can skip this if mult by 0 is not an issue and just do i=block*4
+    i=(block-1)*4; // This adjusts block to be 0...21 - I need to spec 1...22 above to be sure I'm reading a value
+    // since cmdMessenger sets an Int value to 0 if it's not present.
+    fsk9Vals[i]=i1;
+    i++;
+    fsk9Vals[i]=i2;
+    i++;
+    fsk9Vals[i]=i3;
+    i++;
+    fsk9Vals[i]=i4;
+    // Echo the block back for confirmation on host side.
+    cmdMessenger.sendCmdStart(25); // This was last block and simple range check = all good.
+    cmdMessenger.sendCmdArg(block);
+    cmdMessenger.sendCmdArg(i1);  // Echo the values back just to be sure.
+    cmdMessenger.sendCmdArg(i2);  // After all... this is a TX routine so
+    cmdMessenger.sendCmdArg(i3);  // it really is a good idea to double
+    cmdMessenger.sendCmdArg(i4);  // check the values got in correct.
+    cmdMessenger.sendCmdEnd();
+    if(block==22) { jt9Valid = true; } else { jt9Valid = false; }
+  }
 }
-
 void onGFSKVals()
 {
-  // Command ID=22;
+  // Command ID=26;
   // Dumps 126 FSK values previously uploaded
   // for a JT65 frame.
   int i=0;
@@ -1196,41 +1562,34 @@ void onGFSKVals()
   cmdMessenger.sendCmdArg("FSK VALUES FOLLOW");
   for(i=0; i<126; i++)
   {
-    cmdMessenger.sendCmdArg(fskVals[i]);
+    cmdMessenger.sendCmdArg(fsk65Vals[i]);
   }
   cmdMessenger.sendCmdEnd();
 }
-//--- End cmdMessenger callbacks ---
-
-void onSDTXOn()
+void onG9FSKVals()
 {
-  // Command ID 23;
-  long i = cmdMessenger.readIntArg();
-  if(i>0 & i <45)
+  // Command ID=27;
+  // Dumps 88 FSK values previously uploaded
+  // for a JT9 frame.
+  int i=0;
+  cmdMessenger.sendCmdStart(kAck);
+  cmdMessenger.sendCmdArg("FSK VALUES FOLLOW");
+  for(i=0; i<88; i++)
   {
-    symoffset = i;
-    if(jtValid)
-    {
-      jtTXOn = true;
-      cmdMessenger.sendCmdStart(kAck);
-      cmdMessenger.sendCmdArg(23);
-      cmdMessenger.sendCmdArg(i);
-      cmdMessenger.sendCmdEnd();
-    } else
-    {
-      jtTXOn = false;
-      cmdMessenger.sendCmdStart(kError);
-      cmdMessenger.sendCmdArg(23);
-      cmdMessenger.sendCmdArg(-1);
-      cmdMessenger.sendCmdEnd();
-    }
-  } else
-  {
-    jtTXOn = false;
-    cmdMessenger.sendCmdStart(kError);
-    cmdMessenger.sendCmdArg(23);
-    cmdMessenger.sendCmdArg(i);
-    cmdMessenger.sendCmdEnd();
+    cmdMessenger.sendCmdArg(fsk9Vals[i]);
   }
+  cmdMessenger.sendCmdEnd();
+}
+void onGGPSGrid()
+{
+  // Command ID=28;
+  // Returns GPS derived grid
+  cmdMessenger.sendCmd(kAck,28);
+}
+void onGGPSTime()
+{
+  // Command ID=29;
+  // Returns GPS Time
+  cmdMessenger.sendCmd(kAck,29);
 }
 

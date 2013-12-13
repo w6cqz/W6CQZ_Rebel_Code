@@ -18,12 +18,12 @@
 
 // Get all the includes up top - seems to fix some strange
 // compiler issues if I do it here.
+#include <morse.h>
 #include <TinyGPS.h>
 #include <LCD5110_Basic.h>
 #include <Wire.h>
 #include <Streaming.h>  // Needed by CmdMessenger
 #include <CmdMessenger.h>
-#include <morse.h>
 
 // various defines
 #define SDATA_BIT                           10          //  keep!
@@ -64,7 +64,7 @@
 #define  Other_3_user                       2           //
 #define W6CQZ                               0           // Special functions just for me. 
 
-const int ROMVERSION        = 1000; // Defines this firmware revision level - not bothering with major.minor 0 to max_int_value "should" be enough space. :)
+const int ROMVERSION        = 1001; // Defines this firmware revision level - not bothering with major.minor 0 to max_int_value "should" be enough space. :)
 
 const int RitReadPin        = A0;  // pin that the sensor is attached to used for a rit routine later.
 int RitReadValue            = 0;
@@ -176,6 +176,9 @@ unsigned long loopStartTime     = 0;
 unsigned long loopElapsedTime   = 0;
 float         loopSpeed         = 0;
 unsigned long LastFreqWriteTime = 0;
+
+// CWID
+LEDMorseSender cqSender(TX_OUT);
 
 // GPS 
 #define gps_reset_pin  4  //GPS Reset control
@@ -329,7 +332,8 @@ long symoffset = 0;                // Begin at this Index on start TX
 boolean txcwid = false; // When true will fire off CWID in string cwid next pass through loop at frequency set in command.
 boolean txstat = false; // Any time TX is invoked set true
 unsigned long cwidqrg = 0;  // DDS tuning word for CWID QRG
-char cwid[14]; // Holds CW ID text - up to 14 characters.
+//char cwid[14]; // Holds CW ID text - up to 14 characters.
+String cwid = "";
 CmdMessenger cmdMessenger = CmdMessenger(Serial);
 // Commands for rig control
 enum
@@ -536,7 +540,7 @@ void setup()
     glcd.clrScr();
     glcd.print("NO GPS Data",CENTER,40);
   }
-  
+
   Serial.end(); // Ends low rate GPS processing
   
   Serial.begin(115200);  // Fire up serial port (For HFWST this ***must*** be 9600 or 115200 baud)
@@ -715,17 +719,17 @@ void loop()     //
       // Adding CW ID
       if(txcwid)
       {
-        // Minor delay to flush things a touch
-        delay(250);
-        // OK this should set the TX QRG to the sync +/- a little (I'm sending a tuning word with the command so that's done in HFWST)
-        // The message to send is in (string)cwid and tuning word in cwidqrg
-        LEDMorseSender cqSender(TX_OUT);
-        cqSender.setup();
-        cqSender.setMessage(cwid);
         if(cwidqrg > 0)
         {
+        // Minor delay to flush things a touch
+          delay(250);
+          // OK this should set the TX QRG to the sync +/- a little (I'm sending a tuning word with the command so that's done in HFWST)
+          // The message to send is in (string)cwid and tuning word in cwidqrg
+          cqSender.setup();
+          cqSender.setMessage(cwid);
           // DDS register 1 (B) is by default used for TX - no need to preserve it right now
           program_ab(0, cwidqrg); // Remember - program_ab takes a tuning word and sets A and B registers if value > 0.  If = 0 it skips that register.
+          delay(10);
           digitalWrite(FREQ_REGISTER_BIT, HIGH);   // FR One is selected
           // Mark TX on
           txstat = true;
@@ -905,17 +909,16 @@ void loop()     //
       if(txcwid)
       {
         // Minor delay to flush things a touch
-        delay(250);
         // OK this should set the TX QRG to the sync +/- a little (I'm sending a tuning word with the command so that's done in HFWST)
         // The message to send is in (string)cwid and tuning word in cwidqrg
-        LEDMorseSender cqSender(TX_OUT);
-        cqSender.setup();
-        cqSender.setMessage(cwid);
         if(cwidqrg > 0)
         {
+          delay(250);
+          cqSender.setMessage(cwid);
           // DDS register 1 (B) is by default used for TX - no need to preserve it right now
           program_ab(0, cwidqrg); // Remember - program_ab takes a tuning word and sets A and B registers if value > 0.  If = 0 it skips that register.
           digitalWrite(FREQ_REGISTER_BIT, HIGH);   // FR One is selected
+          delay(10);
           // Mark TX on
           txstat = true;
           if(W6CQZ==1)
@@ -1404,7 +1407,7 @@ void onDoCWID()
   // Command ID 21;
   // Expects CWID as string and TX QRG as integer tuning word
   String scwid = cmdMessenger.readStringArg();
-  scwid.toCharArray(cwid,14);
+  cwid = scwid;
   cwidqrg = cmdMessenger.readIntArg();
   txcwid = true;
   cmdMessenger.sendCmdStart(kAck);

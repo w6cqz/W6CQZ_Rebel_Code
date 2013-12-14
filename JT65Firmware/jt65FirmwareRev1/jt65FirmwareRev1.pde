@@ -18,11 +18,11 @@
 
 // Get all the includes up top - seems to fix some strange
 // compiler issues if I do it here.
-#include <morse.h>
 #include <TinyGPS.h>
 #include <LCD5110_Basic.h>
 #include <Wire.h>
 #include <Streaming.h>  // Needed by CmdMessenger
+#include <morse.h>
 #include <CmdMessenger.h>
 
 // various defines
@@ -64,7 +64,7 @@
 #define  Other_3_user                       2           //
 #define W6CQZ                               0           // Special functions just for me. 
 
-const int ROMVERSION        = 1001; // Defines this firmware revision level - not bothering with major.minor 0 to max_int_value "should" be enough space. :)
+const int ROMVERSION        = 1005; // Defines this firmware revision level - not bothering with major.minor 0 to max_int_value "should" be enough space. :)
 
 const int RitReadPin        = A0;  // pin that the sensor is attached to used for a rit routine later.
 int RitReadValue            = 0;
@@ -176,9 +176,6 @@ unsigned long loopStartTime     = 0;
 unsigned long loopElapsedTime   = 0;
 float         loopSpeed         = 0;
 unsigned long LastFreqWriteTime = 0;
-
-// CWID
-LEDMorseSender cqSender(TX_OUT);
 
 // GPS 
 #define gps_reset_pin  4  //GPS Reset control
@@ -327,14 +324,14 @@ unsigned int jt9Sym = 0; // Index to where we are in the symbol TX chain
 
 int rxOffset = 718; // Value to offset RX for correction DO NOT blindly trust this will be correct for your Rebel.
 int txOffset = -50; // Value to offset TX for correction DO NOT blindly trust this will be correct for your Rebel.
-boolean flipflop = true; // Testing something
-long symoffset = 0;                // Begin at this Index on start TX
-boolean txcwid = false; // When true will fire off CWID in string cwid next pass through loop at frequency set in command.
-boolean txstat = false; // Any time TX is invoked set true
-unsigned long cwidqrg = 0;  // DDS tuning word for CWID QRG
-//char cwid[14]; // Holds CW ID text - up to 14 characters.
-String cwid = "";
-CmdMessenger cmdMessenger = CmdMessenger(Serial);
+
+boolean flipflop = true; // Used for ping-pong cycling FSK Values
+long symoffset = 0;      // Begin at this Index on start TX
+
+boolean txstat = false;  // Status of TX
+
+CmdMessenger cmdMessenger = CmdMessenger(Serial);  // Serial handler
+
 // Commands for rig control
 enum
 {
@@ -703,7 +700,6 @@ void loop()     //
           digitalWrite(Band_End_Flash_led, LOW);  // Bling LED Off
           // Mark TX status = off
           txstat = false;
-          txcwid = false; // In case it was set to go before
           break;
         }
       }
@@ -715,43 +711,6 @@ void loop()     //
       {
         digitalWrite(42,LOW);                // External PTT OFF
       }
-        
-      // Adding CW ID
-      if(txcwid)
-      {
-        if(cwidqrg > 0)
-        {
-        // Minor delay to flush things a touch
-          delay(250);
-          // OK this should set the TX QRG to the sync +/- a little (I'm sending a tuning word with the command so that's done in HFWST)
-          // The message to send is in (string)cwid and tuning word in cwidqrg
-          cqSender.setup();
-          cqSender.setMessage(cwid);
-          // DDS register 1 (B) is by default used for TX - no need to preserve it right now
-          program_ab(0, cwidqrg); // Remember - program_ab takes a tuning word and sets A and B registers if value > 0.  If = 0 it skips that register.
-          delay(10);
-          digitalWrite(FREQ_REGISTER_BIT, HIGH);   // FR One is selected
-          // Mark TX on
-          txstat = true;
-          if(W6CQZ==1)
-          {
-            digitalWrite(42,HIGH);                   // External PTT ON
-            delay(20);
-          }
-          digitalWrite(Band_End_Flash_led, HIGH);
-          cqSender.sendBlocking();  // I set the default to 25 WPM - Part 97 only says I need to send an ID - not that I have to be able to copy it!  ;)
-          digitalWrite(FREQ_REGISTER_BIT, LOW);   // FR One is selected
-          digitalWrite(Band_End_Flash_led, LOW);
-          if(W6CQZ==1)
-          {
-            digitalWrite(42,LOW);                   // External PTT OFF
-          }
-          // Mark TX off
-          txstat = false;
-        }
-        txcwid = false; // clear it or we'll be sending it forever.
-      }
-        
       program_ab(rx, 0);
       digitalWrite(FREQ_REGISTER_BIT,LOW);    // FR Zero is selected
       digitalWrite(Select_Red, LOW);          // TX LED Off
@@ -893,7 +852,6 @@ void loop()     //
           digitalWrite(Band_End_Flash_led, LOW);  // Bling LED Off
           // Mark TX status = off
           txstat = false;
-          txcwid = false;
           break;
         }
       }
@@ -904,40 +862,6 @@ void loop()     //
       if(W6CQZ==1)
       {
         digitalWrite(42,LOW);                // External PTT OFF
-      }
-      // Adding CW ID
-      if(txcwid)
-      {
-        // Minor delay to flush things a touch
-        // OK this should set the TX QRG to the sync +/- a little (I'm sending a tuning word with the command so that's done in HFWST)
-        // The message to send is in (string)cwid and tuning word in cwidqrg
-        if(cwidqrg > 0)
-        {
-          delay(250);
-          cqSender.setMessage(cwid);
-          // DDS register 1 (B) is by default used for TX - no need to preserve it right now
-          program_ab(0, cwidqrg); // Remember - program_ab takes a tuning word and sets A and B registers if value > 0.  If = 0 it skips that register.
-          digitalWrite(FREQ_REGISTER_BIT, HIGH);   // FR One is selected
-          delay(10);
-          // Mark TX on
-          txstat = true;
-          if(W6CQZ==1)
-          {
-            digitalWrite(42,HIGH);                   // External PTT ON
-            delay(20);
-          }
-          digitalWrite(Band_End_Flash_led, HIGH);
-          cqSender.sendBlocking();  // I set the default to 25 WPM - Part 97 only says I need to send an ID - not that I have to be able to copy it!  ;)
-          digitalWrite(FREQ_REGISTER_BIT, LOW);   // FR One is selected
-          digitalWrite(Band_End_Flash_led, LOW);
-          if(W6CQZ==1)
-          {
-            digitalWrite(42,LOW);                   // External PTT OFF
-          }
-          // Mark TX off
-          txstat = false;
-        }
-        txcwid = false; // clear it or we'll be sending it forever.
       }
       program_ab(rx, 0);
       digitalWrite(FREQ_REGISTER_BIT,LOW);    // FR Zero is selected
@@ -1337,7 +1261,6 @@ void onSTXOff()
   // Command ID 18;
   jt65TXOn = false;
   jt9TXOn = false;
-  txcwid = false;
   cmdMessenger.sendCmd(kAck,18);
 }
 void onSDTXOn()
@@ -1406,15 +1329,55 @@ void onDoCWID()
 {
   // Command ID 21;
   // Expects CWID as string and TX QRG as integer tuning word
-  String scwid = cmdMessenger.readStringArg();
-  cwid = scwid;
+  // *** SENDS CWID **** Upon receipt of this command as in N O W
+  unsigned long cwidqrg = 0;  // DDS tuning word for CWID QRG
+  String cwid = cmdMessenger.readStringArg();
+  cwid.trim();
   cwidqrg = cmdMessenger.readIntArg();
-  txcwid = true;
-  cmdMessenger.sendCmdStart(kAck);
-  cmdMessenger.sendCmdArg(cwid);
-  cmdMessenger.sendCmdArg(cwidqrg);
-  cmdMessenger.sendCmdEnd();
+  boolean txcwid = false;
+  if(cwid.length()>2) { txcwid = true; } else { txcwid = false; }
+  if(cwidqrg >= 37581152 & cwidqrg <= 77041361 & txcwid) { txcwid = true; } else { txcwid = false; } 
+  
+  if(txcwid)
+  {
+    LEDMorseSender cqSender(TX_OUT);  // Morse code TX handler
+    cqSender.setup(); // Setup Morse TX handler
+    // OK this should set the TX QRG to the sync +/- a little (I'm sending a tuning word with the command so that's done in HFWST)
+    // The message to send is in (string)cwid and tuning word in cwidqrg
+    cqSender.setMessage(cwid);
+    cqSender.setWPM(25.0);
+    // DDS register 1 (B) is by default used for TX - no need to preserve it right now
+    program_ab(0, cwidqrg); // Remember - program_ab takes a tuning word and sets A and B registers if value > 0.  If = 0 it skips that register.
+    delay(10);
+    digitalWrite(FREQ_REGISTER_BIT, HIGH);   // FR One is selected
+    if(W6CQZ==1)
+    {
+      digitalWrite(42,HIGH);                   // External PTT ON
+      delay(20);
+    }
+    digitalWrite(Band_End_Flash_led, HIGH);
+    cqSender.sendBlocking();  // I set the default to 25 WPM so just calling the sender without any parameters
+    digitalWrite(FREQ_REGISTER_BIT, LOW);   // FR Zero is selected
+    digitalWrite(Band_End_Flash_led, LOW);
+    if(W6CQZ==1)
+    {
+      digitalWrite(42,LOW);                   // External PTT OFF
+    }
+    cmdMessenger.sendCmdStart(kAck);
+    cmdMessenger.sendCmdArg(cwid);
+    cmdMessenger.sendCmdArg(cwidqrg);
+    cmdMessenger.sendCmdEnd();
+  }
+  else
+  {
+    // Failed - due to string format or DDS value - flip a coin.
+    cmdMessenger.sendCmdStart(kError);
+    cmdMessenger.sendCmdArg(cwid);
+    cmdMessenger.sendCmdArg(cwidqrg);
+    cmdMessenger.sendCmdEnd();
+  }
 }
+
 void onGClearTX()
 {
   // Command ID 22;

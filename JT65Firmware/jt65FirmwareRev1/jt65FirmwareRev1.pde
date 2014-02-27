@@ -1,8 +1,41 @@
+//
+// WARNING WARNING WARNING
+//
+// USE THIS AT YOUR OWN RISK.  YOU CAN OVERHEAT THE FINAL
+// AMPLIFIER TO THE POINT OF DESTRUCTION IF YOU DON'T TAKE CARE
+// TO MODIFY YOUR REBEL.
+//
+// LOADING THIS FIRMWARE DOES NOT MAKE IT SIMPLE/EASY TO OPERATE
+// JT65a MODE ON THE REBEL - IT ONLY MAKES IT POSSIBLE.  YOU MUST
+// MUST MUST MUST TAKE CARE TO ADJUST YOUR REBEL PROPERLY IF YOU
+// HAVE ANY HOPE OF BEING ABLE TO WORK JT65.
+//
+// THIS CODE IS ONLY A STARTING POINT TO INTERESTING THINGS 
+// POSSIBLE (BARELY) WITH THE REBEL.
+//
+
+/*
+<Rebel_506_Alpha_Rev01, Basic Software to operate a 2 band QRP Transceiver.
+             See PROJECT REBEL QRP below>
+ This library is free software; you can redistribute it and/or
+modify it under the terms of the GNU Lesser General Public
+License as published by the Free Software Foundation; either
+version 2.1 of the License, or (at your option) any later version.
+ 
+This library is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+Lesser General Public License for more details.
+ 
+You should have received a copy of the GNU Lesser General Public
+License along with this library; if not, write to the Free Software
+Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+*/
 
 // Version JT65V006
 // 22-November-2013
 // Added code is;
-// (c) J C Large - W6CQZ internal development use only
+// (c) J C Large - W6CQZ
 //
 // This firmware makes Rebel totally remote controlled.
 // All but the power and audio volume controls do zero
@@ -15,7 +48,9 @@
 // things not currently used as I have uses for some
 // coming up.
 //
-
+//
+//
+//
 // Get all the includes up top - seems to fix some strange
 // compiler issues if I do it here.
 #include <TinyGPS.h>
